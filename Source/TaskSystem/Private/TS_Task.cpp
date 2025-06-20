@@ -1,0 +1,528 @@
+// Fill out your copyright notice in the Description page of Project Settings.
+
+
+#include "TS_Task.h"
+#include <Kismet/KismetSystemLibrary.h>
+#include "TS_TaskCompare.h"
+#include <Common/TS_TaskConfig.h>
+#include "ActorComponent/TS_TaskComponent.h"
+
+UTS_Task::UTS_Task()
+{
+	if (!TaskComponent)
+	{
+		TaskComponent = Cast<UTS_TaskComponent>(GetOuter());
+		if (!TaskComponent)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Task Outer Must Be UTS_TaskComponent Then Can RPC"));
+		}
+	}
+	
+	//如果该值在构造时已经为true，说明服务器添加任务尝试同步属性时，客户端的任务还未创建。 为了保证客户端的流程正确（UI显示等），这里额外调用开始事件
+	if (bTaskIsStart)
+	{
+		StartTask();
+	}
+}
+
+UWorld* UTS_Task::GetWorld() const
+{
+	UObject* outer = GetOuter();
+	if (outer && (outer->IsA<AActor>() || outer->IsA<UActorComponent>() || outer->IsA<USubsystem>()) && !outer->HasAnyFlags(RF_ClassDefaultObject))
+	{
+		return outer->GetWorld();
+	}
+	return nullptr;
+}
+
+bool UTS_Task::IsSupportedForNetworking() const
+{
+	return true;
+}
+
+void UTS_Task::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(UTS_Task, TaskInfo);
+	DOREPLIFETIME(UTS_Task, TaskUniqueID);
+	DOREPLIFETIME(UTS_Task, TaskMustDoTargetNum);
+	DOREPLIFETIME(UTS_Task, bTaskIsComplete);
+	DOREPLIFETIME(UTS_Task, bTaskIsStart);
+	DOREPLIFETIME(UTS_Task, bTaskIsEnd);
+	DOREPLIFETIME(UTS_Task, RoleSigns);
+	DOREPLIFETIME(UTS_Task, TaskActor);
+}
+
+void UTS_Task::ReplicatedUsing_TaskInfoChange()
+{
+	TaskUpdate();
+}
+
+void UTS_Task::ReplicatedUsing_bTaskIsStartChange()
+{
+	StartTask();
+}
+
+void UTS_Task::ReplicatedUsing_bTaskIsEndChange()
+{
+	TaskEnd();
+}
+
+void UTS_Task::ServerRefreshTaskTargetFromInfo(FRefreshTaskTargetInfo RefreshTaskTargetInfo)
+{
+	if (bTaskIsEnd)//已经结束的任务不应该再判断了
+	{
+		return;
+	}
+	TArray<FTaskTargetInfo> AllTaskTargetInfo = TaskInfo.TaskTargetInfo;//某个任务完成后可能会增加目标，为了防止在遍历中发生改变，这里复制一份数据出来进行遍历
+	int32 CompleteTaskTargetNum = 0;//完成的普通任务目标数量
+	int32 CompleteTaskTargetNum_MustDo = 0;//完成的必做任务目标数量
+	int32 TaskTargetEndNum = 0;//结束的任务目标数量
+	for (int32 i = 0; i < AllTaskTargetInfo.Num(); i++)
+	{
+		if (!TaskInfo.TaskTargetInfo[i].bTaskTargetIsEnd && (RefreshTaskTargetInfo.RefreshTaskTargetID == TaskInfo.TaskTargetInfo[i].TaskTargetID ||//ID相同直接通过
+			(TaskInfo.TaskTargetInfo[i].bCompareInfoIsOverride && SomeTaskTargetUpdateCheck(TaskInfo.TaskTargetInfo[i], RefreshTaskTargetInfo))))//开启除了ID之外的其他检测方式 && 经过自定义的二次比对后可以增加进度
+		{
+			//通过比对
+			if (TaskInfo.TaskTargetInfo[i].AddProgress(RefreshTaskTargetInfo.AddProgress, RefreshTaskTargetInfo.RoleSign))//触发客户端的TaskUpdate同步函数
+			{
+				SomeTaskTargetEnd(TaskInfo.TaskTargetInfo[i], true);
+			}
+			TaskUpdate();//服务器调用该函数
+		}
+		if (TaskInfo.TaskTargetInfo[i].bTaskTargetIsEnd)//目标已经结束
+		{
+			TaskTargetEndNum++;
+			if (TaskInfo.TaskTargetInfo[i].TaskTargetIsComplete())
+			{
+				if (TaskInfo.TaskTargetInfo[i].TaskTargetIsMustDo())//目标是否是必做
+				{
+					CompleteTaskTargetNum_MustDo++;
+				}
+				else
+				{
+					CompleteTaskTargetNum++;
+				}
+			}
+		}
+	}
+	TaskEndCheckOfParameter(CompleteTaskTargetNum, CompleteTaskTargetNum_MustDo, TaskTargetEndNum);
+}
+
+void UTS_Task::ServerRefreshTaskTargetFromInfoArray(const TArray<FRefreshTaskTargetInfo>& RefreshTaskTargetInfoArray)
+{
+	for (int32 i = 0; i < RefreshTaskTargetInfoArray.Num(); i++)
+	{
+		ServerRefreshTaskTargetFromInfo(RefreshTaskTargetInfoArray[i]);
+	}
+}
+
+void UTS_Task::ServerRefreshTaskTargetFromComponent(UTS_TaskComponent* TriggerTaskComponent, FName RoleSign)
+{
+	if (TriggerTaskComponent)
+	{
+		for (FRefreshTaskTargetInfo RefreshInfo : TriggerTaskComponent->RefreshTaskTargetInfos)
+		{
+			RefreshInfo.RoleSign = RoleSign;
+			ServerRefreshTaskTargetFromInfo(RefreshInfo);
+		}
+	}
+}
+
+bool UTS_Task::TryInitTaskInfoFromDataTable_Implementation(FTaskInfo& DTTaskInfo)
+{
+	bool ReturnBool = false;
+	UDataTable* DT = UTS_TaskConfig::GetInstance()->AllTask.LoadSynchronous();
+	if (DT)
+	{
+		FTaskInfo* TaskInfo_DT = DT->FindRow<FTaskInfo>(FName(*FString::FromInt(TaskInfo.TaskID)), TEXT(""));
+		if (TaskInfo_DT)
+		{
+			TaskInfo = *TaskInfo_DT;
+			DTTaskInfo = TaskInfo;
+			ReturnBool = true;
+		}
+		else//如果找不到该任务认为是一个自定义的任务
+		{
+		}
+	}
+
+	//任务目标初始化
+	FTaskTargetInfo TaskTargetInfoTemp;
+	for (FTaskTargetInfo& TargetInfo : TaskInfo.TaskTargetInfo)
+	{
+		if (!TargetInfo.bIsCustom)//不是自定义的任务目标才需要尝试去读表初始化
+		{
+			TryInitTaskTargetFromDataTable(TargetInfo, TaskTargetInfoTemp);
+		}
+	}
+
+	return ReturnBool;
+}
+
+bool UTS_Task::TryInitTaskTargetFromDataTable_Implementation(FTaskTargetInfo& TaskTarget, FTaskTargetInfo& DTTaskTargetInfo)
+{
+	UDataTable* DT = UTS_TaskConfig::GetInstance()->AllTaskTarget.LoadSynchronous();
+	if (DT)
+	{
+		FTaskTargetInfo* TaskTargetInfo_DT = DT->FindRow<FTaskTargetInfo>(FName(*FString::FromInt(TaskTarget.TaskTargetID)), TEXT(""));
+		if (TaskTargetInfo_DT)
+		{
+			TaskTarget.InitFromTaskTargetInfo(*TaskTargetInfo_DT);//内部赋值
+			DTTaskTargetInfo = TaskTarget;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+void UTS_Task::StartTask_Implementation()
+{
+	if (UKismetSystemLibrary::IsServer(this))//该函数首次由UTS_TaskComponent在服务器调用
+	{
+		//计时器只在服务器上开启
+		if (TaskInfo.TaskTime > 0.0f)
+		{
+			GetWorld()->GetTimerManager().SetTimer(TaskTimeHandle, this, &UTS_Task::TaskEnd, TaskInfo.TaskTime);
+		}
+		for (FTaskTargetInfo& TaskTargetInfo : TaskInfo.TaskTargetInfo)
+		{
+			SetTaskTargetTimer(TaskTargetInfo);
+		}
+
+		FTaskInfo TaskInfoTemp;
+		TryInitTaskInfoFromDataTable(TaskInfoTemp);
+
+		bTaskIsStart = true;//触发客户端的StartTask同步函数
+
+		//判断任务是否拥有必做目标
+		for (FTaskTargetInfo& TargetInfo : TaskInfo.TaskTargetInfo)
+		{
+			if (TargetInfo.TaskTargetIsMustDo())
+			{
+				TaskMustDoTargetNum++;
+			}
+		}
+	}
+	TaskStartEvent.Broadcast(this);
+}
+
+void UTS_Task::TaskUpdate_Implementation()
+{
+	TaskUpdateEvent.Broadcast(this);
+}
+
+void UTS_Task::TaskEnd_Implementation()
+{
+	//服务器上的任务计时是否结束了
+	if (UKismetSystemLibrary::K2_GetTimerElapsedTimeHandle(this, TaskTimeHandle) >= TaskInfo.TaskTime)
+	{
+		bTaskIsEnd = true;//触发客户端的TaskEnd同步函数
+	}
+
+	//如果任务结束————停止计时器
+	if (bTaskIsEnd)
+	{
+		GetWorld()->GetTimerManager().ClearTimer(TaskTimeHandle);
+		//任务结束，停止所有的目标计时器
+		for (TPair<FString, FTimerHandle> pair : TaskTargetTimeHandle)
+		{
+			GetWorld()->GetTimerManager().ClearTimer(pair.Value);
+		}
+	}
+	TaskEndEvent.Broadcast(this);
+}
+
+void UTS_Task::ServerTaskEnd(bool IsComplete/* = true*/)
+{
+	bTaskIsComplete = IsComplete;
+	bTaskIsEnd = true;//触发客户端的TaskEnd同步函数
+	TaskEnd();//服务器调用该函数
+}
+
+void UTS_Task::TaskEndCheck()
+{
+	int32 CompleteTaskTargetNum = 0;//完成的任务目标数量
+	int32 CompleteTaskTargetNum_MustDo = 0;//完成的必做任务目标数量
+	int32 TaskTargetEndNum = 0;//结束的任务目标数量
+	for (FTaskTargetInfo& Info : TaskInfo.TaskTargetInfo)
+	{
+		if (Info.bTaskTargetIsEnd)
+		{
+			TaskTargetEndNum++;
+			if (Info.TaskTargetIsComplete())
+			{
+				if (Info.TaskTargetIsMustDo())//目标是否是必做
+				{
+					CompleteTaskTargetNum_MustDo++;
+				}
+				else
+				{
+					CompleteTaskTargetNum++;
+				}
+			}
+		}
+	}
+	TaskEndCheckOfParameter(CompleteTaskTargetNum, CompleteTaskTargetNum_MustDo, TaskTargetEndNum);
+}
+
+void UTS_Task::TaskEndCheckOfParameter(int32 CompleteTaskTargetNum, int32 CompleteTaskTargetNum_MustDo, int32 TaskTargetEndNum)
+{
+	bool TaskIsComplete = false;
+	if (TaskMustDoTargetNum > 0)//任务是否有必做目标
+	{
+		TaskIsComplete = CompleteTaskTargetNum_MustDo >= TaskMustDoTargetNum;
+	}
+	else
+	{
+		TaskIsComplete = CompleteTaskTargetNum + CompleteTaskTargetNum_MustDo >= TaskInfo.TaskCompleteTargetNum;
+	}
+
+	/*只有没有必做目标的任务才需要进行以下的判断
+	* 任务完成了 || 如果任务没有完成，判断是否还有机会完成
+	* 情况1：任务目标在任务开始就全部发放了，这样判断是没有问题的
+	* 情况2：任务目标需要在过程中动态给予，可能某个任务目标会触发新的目标，这样该判断就容易触发结束
+	* 例如：需要完成6个目标的任务开始只发放了一个目标，那么这一个目标的更新，根据下面的判断始终会判断成：没有机会完成了
+	*/
+	if (TaskIsComplete || (TaskMustDoTargetNum <= 0 && TaskInfo.TaskTargetInfo.Num() - TaskTargetEndNum + CompleteTaskTargetNum + CompleteTaskTargetNum_MustDo < TaskInfo.TaskCompleteTargetNum))
+	{
+		//将全部目标设为结束
+		for (FTaskTargetInfo& TargetInfo : TaskInfo.TaskTargetInfo)
+		{
+			TargetInfo.bTaskTargetIsEnd = true;//触发客户端的TaskUpdate同步函数
+		}
+		ServerTaskEnd(TaskIsComplete);
+	}
+}
+
+void UTS_Task::ServerTaskTargetEnd_ID(int32 TaskTargetID, bool IsComplete)
+{
+	for (FTaskTargetInfo& Info : TaskInfo.TaskTargetInfo)
+	{
+		if (Info.TaskTargetID == TaskTargetID)
+		{
+			ServerTaskTargetEnd_TaskTargetInfo(Info, IsComplete);
+			break;
+		}
+	}
+}
+
+void UTS_Task::ServerTaskTargetEnd_Index(int32 TaskTargetIndex, bool IsComplete)
+{
+	if (TaskInfo.TaskTargetInfo.IsValidIndex(TaskTargetIndex))
+	{
+		ServerTaskTargetEnd_TaskTargetInfo(TaskInfo.TaskTargetInfo[TaskTargetIndex], IsComplete);
+	}
+}
+
+void UTS_Task::ServerTaskTargetEnd_TaskTargetInfo(UPARAM(Ref)FTaskTargetInfo& TaskTargetInfo, bool IsComplete)
+{
+	TaskTargetInfo.bTaskTargetIsEnd = true;//触发客户端的TaskUpdate同步函数
+	if (IsComplete)
+	{
+		TaskTargetInfo.TaskTargetCurCount = TaskTargetInfo.TaskTargetMaxCount;
+	}
+	TaskEndCheck();
+}
+
+void UTS_Task::ServerAddTaskTarget_Implementation(FTaskTargetInfo NewTaskTargetInfo)
+{
+	TaskInfo.TaskTargetInfo.Add(NewTaskTargetInfo);
+	if (NewTaskTargetInfo.TaskTargetIsMustDo())
+	{
+		TaskMustDoTargetNum++;
+	}
+	SetTaskTargetTimer(NewTaskTargetInfo);
+	TaskUpdate();
+}
+
+void UTS_Task::SetTaskTargetTimer(FTaskTargetInfo& TaskTargetInfo)
+{
+	if (TaskTargetInfo.TaskTargetTime > 0.0f)//有时效显示的目标才会创建Handle
+	{
+		FTimerHandle TargetInfoTimerHandle;
+		GetWorld()->GetTimerManager().SetTimer(TargetInfoTimerHandle, this, &UTS_Task::SomeTaskTargetTimeEnd, TaskTargetInfo.TaskTargetTime);
+		TaskTargetTimeHandle.Add(TaskTargetInfo.TaskTargetText.ToString(), TargetInfoTimerHandle);
+	}
+}
+
+void UTS_Task::ServerAddTaskTargetOfID(int32 NewTaskTargetID)
+{
+	FTaskTargetInfo Data,DTData;
+	Data.TaskTargetID = NewTaskTargetID;
+	if (TryInitTaskTargetFromDataTable(Data, DTData))
+	{
+		ServerAddTaskTarget(DTData);
+	}
+}
+
+void UTS_Task::ServerAddTaskTargetOfID_Array(TArray<int32> NewTaskTargetIDArray)
+{
+	for (int32& i : NewTaskTargetIDArray)
+	{
+		ServerAddTaskTargetOfID(i);
+	}
+}
+
+void UTS_Task::SomeTaskTargetTimeEnd()
+{
+	//该函数被调用通常是某个任务目标时限到了 该函数在Server上才会被调用
+	int32 CompleteTaskTargetNum = 0;//完成的任务目标数量
+	int32 CompleteTaskTargetNum_MustDo = 0;//完成的必做任务目标数量
+	int32 TaskTargetEndNum = 0;//结束的任务目标数量
+	bool IsFind = false;
+	TArray<FTaskTargetInfo> AllTaskTargetInfo = TaskInfo.TaskTargetInfo;//某个任务目标失败后可能会增加目标，为了防止在遍历中发生改变，这里复制一份数据出来进行遍历
+	for (int32 i = 0; i < AllTaskTargetInfo.Num(); i++)
+	{
+		if (!IsFind)//找到结束的任务目标
+		{
+			FString Key = TaskInfo.TaskTargetInfo[i].TaskTargetText.ToString();
+			if (TaskTargetTimeHandle.Contains(Key))
+			{
+				float TimerHandleTime = UKismetSystemLibrary::K2_GetTimerElapsedTimeHandle(this, TaskTargetTimeHandle[Key]);
+				if (TimerHandleTime >= TaskInfo.TaskTargetInfo[i].TaskTargetTime || TimerHandleTime <= 0.0f)//<0表示已经结束了
+				{
+					TaskInfo.TaskTargetInfo[i].bTaskTargetIsEnd = true;//触发客户端的TaskUpdate同步函数
+					if (TaskInfo.TaskTargetInfo[i].bTimeEndComplete)
+					{
+						TaskInfo.TaskTargetInfo[i].TaskTargetCurCount = TaskInfo.TaskTargetInfo[i].TaskTargetMaxCount;
+					}
+					SomeTaskTargetEnd(TaskInfo.TaskTargetInfo[i], TaskInfo.TaskTargetInfo[i].bTimeEndComplete);
+					TaskUpdate();//服务器调用更新
+					GetWorld()->GetTimerManager().ClearTimer(TaskTargetTimeHandle[Key]);
+					TaskTargetTimeHandle.Remove(Key);
+					IsFind = true;
+
+				}
+			}
+		}
+		if (TaskInfo.TaskTargetInfo[i].bTaskTargetIsEnd)
+		{
+			TaskTargetEndNum++;
+			if (TaskInfo.TaskTargetInfo[i].TaskTargetIsComplete())
+			{
+				if (TaskInfo.TaskTargetInfo[i].TaskTargetIsMustDo())//目标是否是必做
+				{
+					CompleteTaskTargetNum_MustDo++;
+				}
+				else
+				{
+					CompleteTaskTargetNum++;
+				}
+			}
+		}
+	}
+
+	TaskEndCheckOfParameter(CompleteTaskTargetNum, CompleteTaskTargetNum_MustDo, TaskTargetEndNum);
+}
+
+void UTS_Task::SomeTaskTargetEnd_Implementation(const FTaskTargetInfo& CompleteTaskTarget, bool IsComplete)
+{
+	for (FTaskChainInfo ChainInfo : CompleteTaskTarget.ChainTaskTargetInfo)//某个任务目标完成了，尝试触发连锁
+	{
+		if (ChainInfo.bTriggerIsComplete == IsComplete)
+		{
+			if (ChainInfo.TypeTag == FGameplayTag::RequestGameplayTag("Task.Target"))//添加任务目标
+			{
+				ServerAddTaskTargetOfID(ChainInfo.ID);
+			}
+			else if (ChainInfo.TypeTag == FGameplayTag::RequestGameplayTag("Task"))//添加任务
+			{
+				if (TaskComponent)
+				{
+					TaskComponent->ServerAddTaskFromID(ChainInfo.ID);
+				}
+			}
+		}
+	}
+}
+
+bool UTS_Task::SomeTaskTargetUpdateCheck_Implementation(FTaskTargetInfo CheckTaskTarget, FRefreshTaskTargetInfo RefreshTaskTargetInfo)
+{
+	if (CheckTaskTarget.TaskTargetCompareInfo.IsUseTaskCompare)//是否使用对照类进行比对
+	{
+		if (!CheckTaskTarget.TaskTargetCompareInfo.TaskCompareClass.IsNull())
+		{
+			UTS_TaskCompare* TS_TaskCompare = NewObject<UTS_TaskCompare>(this, CheckTaskTarget.TaskTargetCompareInfo.TaskCompareClass.LoadSynchronous());//这里可以作为对象池进行优化
+			if (TS_TaskCompare)
+			{
+				return TS_TaskCompare->CompareResult(CheckTaskTarget.TaskTargetCompareInfo, RefreshTaskTargetInfo);
+			}
+		}
+		return false;
+	}
+	else
+	{
+		//String判断 如果有该限制就需要相等
+		if (!CheckTaskTarget.TaskTargetCompareInfo.TaskCompareString_Info.IsEmpty())
+		{
+			if (CheckTaskTarget.TaskTargetCompareInfo.TaskCompareString_Info != RefreshTaskTargetInfo.TaskTargetCompareInfo.TaskCompareString_Info)
+			{
+				return false;
+			}
+		}
+
+		//Class判断 是否有Class条件
+		if (!CheckTaskTarget.TaskTargetCompareInfo.TaskCompareClass_Info.IsNull())
+		{
+			//Class一致 或者 Object属于子类
+			if (!(RefreshTaskTargetInfo.TaskTargetCompareInfo.TaskCompareClass_Info.IsValid() && CheckTaskTarget.TaskTargetCompareInfo.TaskCompareClass_Info == RefreshTaskTargetInfo.TaskTargetCompareInfo.TaskCompareClass_Info) &&
+				!(RefreshTaskTargetInfo.TaskTargetCompareInfo.TaskCompareObject_Info && RefreshTaskTargetInfo.TaskTargetCompareInfo.TaskCompareObject_Info->IsA(CheckTaskTarget.TaskTargetCompareInfo.TaskCompareClass_Info.Get())))
+			{
+				return false;
+			}
+		}
+
+		//Tag对照判断
+		if (!CheckTaskTarget.TaskTargetCompareInfo.TaskCompareTag_Info.IsEmpty())
+		{
+			if (!RefreshTaskTargetInfo.TaskTargetCompareInfo.TaskCompareTag_Info.IsEmpty())//比对对象数据也需要有tag否则失败
+			{
+				if (CheckTaskTarget.TaskTargetCompareInfo.TaskCompareTagIsAllMatch)//对比是否包含任意一个tag还是 全部tag都需要包含
+				{
+					if (CheckTaskTarget.TaskTargetCompareInfo.TaskCompareTagIsExactMatch)
+					{
+						return RefreshTaskTargetInfo.TaskTargetCompareInfo.TaskCompareTag_Info.HasAllExact(CheckTaskTarget.TaskTargetCompareInfo.TaskCompareTag_Info);
+					}
+					else
+					{
+						return RefreshTaskTargetInfo.TaskTargetCompareInfo.TaskCompareTag_Info.HasAll(CheckTaskTarget.TaskTargetCompareInfo.TaskCompareTag_Info);
+					}
+				}
+				else
+				{
+					if (CheckTaskTarget.TaskTargetCompareInfo.TaskCompareTagIsExactMatch)
+					{
+						return RefreshTaskTargetInfo.TaskTargetCompareInfo.TaskCompareTag_Info.HasAnyExact(CheckTaskTarget.TaskTargetCompareInfo.TaskCompareTag_Info);
+					}
+					else
+					{
+						return RefreshTaskTargetInfo.TaskTargetCompareInfo.TaskCompareTag_Info.HasAny(CheckTaskTarget.TaskTargetCompareInfo.TaskCompareTag_Info);
+					}
+				}
+			}
+			else
+			{
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+bool UTS_Task::GetTaskParameterValue(FName ParameterName, float& Value)
+{
+	if (TaskParameter.Contains(ParameterName))
+	{
+		Value = TaskParameter[ParameterName];
+		return true;
+	}
+	else if(TaskInfo.GetParameterValue(ParameterName, Value))
+	{
+		TaskParameter.Add(ParameterName, Value);
+		return true;
+	}
+	return false;
+}
