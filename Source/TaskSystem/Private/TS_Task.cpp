@@ -130,17 +130,17 @@ void UTS_Task::ServerRefreshTaskTargetFromComponent(UTS_TaskComponent* TriggerTa
 	}
 }
 
-bool UTS_Task::TryInitTaskInfoFromDataTable_Implementation(FTaskInfo& DTTaskInfo)
+bool UTS_Task::TryInitTaskInfoFromDataTable(FTaskInfo& DataTaskInfo, FTaskInfo& DTTaskInfo)
 {
 	bool ReturnBool = false;
 	UDataTable* DT = UTS_TaskConfig::GetInstance()->AllTask.LoadSynchronous();
 	if (DT)
 	{
-		FTaskInfo* TaskInfo_DT = DT->FindRow<FTaskInfo>(FName(*FString::FromInt(TaskInfo.TaskID)), TEXT(""));
+		FTaskInfo* TaskInfo_DT = DT->FindRow<FTaskInfo>(FName(*FString::FromInt(DataTaskInfo.TaskID)), TEXT(""));
 		if (TaskInfo_DT)
 		{
-			TaskInfo = *TaskInfo_DT;
-			DTTaskInfo = TaskInfo;
+			DTTaskInfo = *TaskInfo_DT;
+			DataTaskInfo = ModifyTaskInfo(DTTaskInfo);
 			ReturnBool = true;
 		}
 		else//如果找不到该任务认为是一个自定义的任务
@@ -150,7 +150,7 @@ bool UTS_Task::TryInitTaskInfoFromDataTable_Implementation(FTaskInfo& DTTaskInfo
 
 	//任务目标初始化
 	FTaskTargetInfo TaskTargetInfoTemp;
-	for (FTaskTargetInfo& TargetInfo : TaskInfo.TaskTargetInfo)
+	for (FTaskTargetInfo& TargetInfo : DataTaskInfo.TaskTargetInfo)
 	{
 		if (!TargetInfo.bIsCustom)//不是自定义的任务目标才需要尝试去读表初始化
 		{
@@ -161,16 +161,22 @@ bool UTS_Task::TryInitTaskInfoFromDataTable_Implementation(FTaskInfo& DTTaskInfo
 	return ReturnBool;
 }
 
-bool UTS_Task::TryInitTaskTargetFromDataTable_Implementation(FTaskTargetInfo& TaskTarget, FTaskTargetInfo& DTTaskTargetInfo)
+FTaskInfo UTS_Task::ModifyTaskInfo_Implementation(FTaskInfo DataTaskInfo)
+{
+	return DataTaskInfo;
+}
+
+bool UTS_Task::TryInitTaskTargetFromDataTable(FTaskTargetInfo& DataTaskTarget, FTaskTargetInfo& DTTaskTargetInfo)
 {
 	UDataTable* DT = UTS_TaskConfig::GetInstance()->AllTaskTarget.LoadSynchronous();
 	if (DT)
 	{
-		FTaskTargetInfo* TaskTargetInfo_DT = DT->FindRow<FTaskTargetInfo>(FName(*FString::FromInt(TaskTarget.TaskTargetID)), TEXT(""));
+		FTaskTargetInfo* TaskTargetInfo_DT = DT->FindRow<FTaskTargetInfo>(FName(*FString::FromInt(DataTaskTarget.TaskTargetID)), TEXT(""));
 		if (TaskTargetInfo_DT)
 		{
-			TaskTarget.InitFromTaskTargetInfo(*TaskTargetInfo_DT);//内部赋值
-			DTTaskTargetInfo = TaskTarget;
+			DTTaskTargetInfo = *TaskTargetInfo_DT;
+			DataTaskTarget.InitFromTaskTargetInfo(DTTaskTargetInfo);//通过其他任务目标信息初始化自身
+			DataTaskTarget = ModifyTaskTargetInfo(DataTaskTarget);
 			return true;
 		}
 	}
@@ -178,33 +184,34 @@ bool UTS_Task::TryInitTaskTargetFromDataTable_Implementation(FTaskTargetInfo& Ta
 	return false;
 }
 
+FTaskTargetInfo UTS_Task::ModifyTaskTargetInfo_Implementation(FTaskTargetInfo DataTaskTarget)
+{
+	return DataTaskTarget;
+}
+
 void UTS_Task::StartTask_Implementation()
 {
 	if (UKismetSystemLibrary::IsServer(this))//该函数首次由UTS_TaskComponent在服务器调用
 	{
+		FTaskInfo TaskInfoTemp;
+		TryInitTaskInfoFromDataTable(TaskInfo, TaskInfoTemp);//查表初始化
+
 		//计时器只在服务器上开启
 		if (TaskInfo.TaskTime > 0.0f)
 		{
 			GetWorld()->GetTimerManager().SetTimer(TaskTimeHandle, this, &UTS_Task::TaskEnd, TaskInfo.TaskTime);
 		}
-		for (FTaskTargetInfo& TaskTargetInfo : TaskInfo.TaskTargetInfo)
+
+		TArray<FTaskTargetInfo> InitTaskTarget = TaskInfo.TaskTargetInfo;
+		TaskInfo.TaskTargetInfo.Empty();//清空，通过下面for循环处理完后再重新添加
+		for (FTaskTargetInfo& TaskTargetInfo : InitTaskTarget)
 		{
 			SetTaskTargetTimer(TaskTargetInfo);
-		}
 
-		FTaskInfo TaskInfoTemp;
-		TryInitTaskInfoFromDataTable(TaskInfoTemp);
+			ServerAddTaskTarget(TaskTargetInfo);
+		}
 
 		bTaskIsStart = true;//触发客户端的StartTask同步函数
-
-		//判断任务是否拥有必做目标
-		for (FTaskTargetInfo& TargetInfo : TaskInfo.TaskTargetInfo)
-		{
-			if (TargetInfo.TaskTargetIsMustDo())
-			{
-				TaskMustDoTargetNum++;
-			}
-		}
 	}
 	TaskStartEvent.Broadcast(this);
 }
@@ -281,12 +288,12 @@ void UTS_Task::TaskEndCheckOfParameter(int32 CompleteTaskTargetNum, int32 Comple
 	}
 
 	/*只有没有必做目标的任务才需要进行以下的判断
-	* 任务完成了 || 如果任务没有完成，判断是否还有机会完成
+	* 任务完成了 || 如果任务没有完成，判断是否还有机会完成 （结束判断暂时屏蔽，无法完美解决情况2）
 	* 情况1：任务目标在任务开始就全部发放了，这样判断是没有问题的
 	* 情况2：任务目标需要在过程中动态给予，可能某个任务目标会触发新的目标，这样该判断就容易触发结束
 	* 例如：需要完成6个目标的任务开始只发放了一个目标，那么这一个目标的更新，根据下面的判断始终会判断成：没有机会完成了
 	*/
-	if (TaskIsComplete || (TaskMustDoTargetNum <= 0 && TaskInfo.TaskTargetInfo.Num() - TaskTargetEndNum + CompleteTaskTargetNum + CompleteTaskTargetNum_MustDo < TaskInfo.TaskCompleteTargetNum))
+	if (TaskIsComplete/* || (TaskMustDoTargetNum <= 0 && TaskInfo.TaskTargetInfo.Num() - TaskTargetEndNum + CompleteTaskTargetNum + CompleteTaskTargetNum_MustDo < TaskInfo.TaskCompleteTargetNum)*/)
 	{
 		//将全部目标设为结束
 		for (FTaskTargetInfo& TargetInfo : TaskInfo.TaskTargetInfo)
@@ -441,75 +448,8 @@ void UTS_Task::SomeTaskTargetEnd_Implementation(const FTaskTargetInfo& CompleteT
 
 bool UTS_Task::SomeTaskTargetUpdateCheck_Implementation(FTaskTargetInfo CheckTaskTarget, FRefreshTaskTargetInfo RefreshTaskTargetInfo)
 {
-	if (CheckTaskTarget.TaskTargetCompareInfo.IsUseTaskCompare)//是否使用对照类进行比对
-	{
-		if (!CheckTaskTarget.TaskTargetCompareInfo.TaskCompareClass.IsNull())
-		{
-			UTS_TaskCompare* TS_TaskCompare = NewObject<UTS_TaskCompare>(this, CheckTaskTarget.TaskTargetCompareInfo.TaskCompareClass.LoadSynchronous());//这里可以作为对象池进行优化
-			if (TS_TaskCompare)
-			{
-				return TS_TaskCompare->CompareResult(CheckTaskTarget.TaskTargetCompareInfo, RefreshTaskTargetInfo);
-			}
-		}
-		return false;
-	}
-	else
-	{
-		//String判断 如果有该限制就需要相等
-		if (!CheckTaskTarget.TaskTargetCompareInfo.TaskCompareString_Info.IsEmpty())
-		{
-			if (CheckTaskTarget.TaskTargetCompareInfo.TaskCompareString_Info != RefreshTaskTargetInfo.TaskTargetCompareInfo.TaskCompareString_Info)
-			{
-				return false;
-			}
-		}
-
-		//Class判断 是否有Class条件
-		if (!CheckTaskTarget.TaskTargetCompareInfo.TaskCompareClass_Info.IsNull())
-		{
-			//Class一致 或者 Object属于子类
-			if (!(RefreshTaskTargetInfo.TaskTargetCompareInfo.TaskCompareClass_Info.IsValid() && CheckTaskTarget.TaskTargetCompareInfo.TaskCompareClass_Info == RefreshTaskTargetInfo.TaskTargetCompareInfo.TaskCompareClass_Info) &&
-				!(RefreshTaskTargetInfo.TaskTargetCompareInfo.TaskCompareObject_Info && RefreshTaskTargetInfo.TaskTargetCompareInfo.TaskCompareObject_Info->IsA(CheckTaskTarget.TaskTargetCompareInfo.TaskCompareClass_Info.Get())))
-			{
-				return false;
-			}
-		}
-
-		//Tag对照判断
-		if (!CheckTaskTarget.TaskTargetCompareInfo.TaskCompareTag_Info.IsEmpty())
-		{
-			if (!RefreshTaskTargetInfo.TaskTargetCompareInfo.TaskCompareTag_Info.IsEmpty())//比对对象数据也需要有tag否则失败
-			{
-				if (CheckTaskTarget.TaskTargetCompareInfo.TaskCompareTagIsAllMatch)//对比是否包含任意一个tag还是 全部tag都需要包含
-				{
-					if (CheckTaskTarget.TaskTargetCompareInfo.TaskCompareTagIsExactMatch)
-					{
-						return RefreshTaskTargetInfo.TaskTargetCompareInfo.TaskCompareTag_Info.HasAllExact(CheckTaskTarget.TaskTargetCompareInfo.TaskCompareTag_Info);
-					}
-					else
-					{
-						return RefreshTaskTargetInfo.TaskTargetCompareInfo.TaskCompareTag_Info.HasAll(CheckTaskTarget.TaskTargetCompareInfo.TaskCompareTag_Info);
-					}
-				}
-				else
-				{
-					if (CheckTaskTarget.TaskTargetCompareInfo.TaskCompareTagIsExactMatch)
-					{
-						return RefreshTaskTargetInfo.TaskTargetCompareInfo.TaskCompareTag_Info.HasAnyExact(CheckTaskTarget.TaskTargetCompareInfo.TaskCompareTag_Info);
-					}
-					else
-					{
-						return RefreshTaskTargetInfo.TaskTargetCompareInfo.TaskCompareTag_Info.HasAny(CheckTaskTarget.TaskTargetCompareInfo.TaskCompareTag_Info);
-					}
-				}
-			}
-			else
-			{
-				return false;
-			}
-		}
-	}
-	return true;
+	FText FailText;
+	return CheckTaskTarget.BeCompareInfo.CompareResult(RefreshTaskTargetInfo.CompareInfo, FailText);
 }
 
 bool UTS_Task::GetTaskParameterValue(FName ParameterName, float& Value)

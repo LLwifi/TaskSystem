@@ -4,12 +4,15 @@
 #include <Engine/DataTable.h>
 #include <GameplayTagContainer.h>
 #include <Common/TS_TaskConfig.h>
+#include "../../../../CommonCompare/Source/CommonCompare/Public/CC_StructAndEnum.h"
 #include "TS_StructAndEnum.generated.h"
+
 
 class UTS_TaskCompare;
 
 /*任务的对比对照结构体
 * 该结构体将常见的比较情况进行了汇总
+* 已经废弃，勿用
 */
 USTRUCT(BlueprintType)
 struct FTaskCompareInfo : public FTableRowBase
@@ -73,9 +76,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	int32 TaskConditionID;
 
-	//任务目标对照结构信息
+	//被比对信息
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	FTaskCompareInfo TaskConditionCompareInfo;
+	FCC_BeCompareInfo BeCompareInfo;
 };
 
 /*任务的贡献
@@ -228,7 +231,8 @@ public:
 		if (!bCompareInfoIsOverride)
 		{
 			bCompareInfoIsOverride = TaskTargetInfo.bCompareInfoIsOverride;
-			TaskTargetCompareInfo = TaskTargetInfo.TaskTargetCompareInfo;
+			//TaskTargetCompareInfo = TaskTargetInfo.TaskTargetCompareInfo;
+			BeCompareInfo = TaskTargetInfo.BeCompareInfo;
 		}
 		if (ChainTaskTargetInfo.Num() == 0)
 		{
@@ -331,9 +335,12 @@ public:
 	//任务目标的对照结构信息是否需要覆盖 同时在目标本身上表示着是否开启除了ID之外的其他检测方式
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bCompareInfoIsOverride = false;
-	//任务目标对照结构信息
+	////任务目标对照结构信息* 已经废弃，勿用
+	//UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditConditionHides, EditCondition = "bCompareInfoIsOverride"))
+	//FTaskCompareInfo TaskTargetCompareInfo;
+	//被比对信息
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditConditionHides, EditCondition = "bCompareInfoIsOverride"))
-	FTaskCompareInfo TaskTargetCompareInfo;
+	FCC_BeCompareInfo BeCompareInfo;
 
 	/*连锁目标信息 当该任务目标完成时，会自动触发尝试添加的任务/任务目标ID
 	* 该值有效且bIsCustom为false时，可以覆盖表数据的参数
@@ -362,9 +369,12 @@ public:
 	*/
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	int32 RefreshTaskTargetID = -1;
-	//任务目标对照结构信息
+	////任务目标对照结构信息* 已经废弃，勿用
+	//UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	//FTaskCompareInfo TaskTargetCompareInfo;
+	//对比信息
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	FTaskCompareInfo TaskTargetCompareInfo;
+	FCC_CompareInfo CompareInfo;
 	//增加的进度
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	int32 AddProgress = 1;

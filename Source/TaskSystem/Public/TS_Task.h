@@ -48,15 +48,31 @@ public:
 	UFUNCTION(BlueprintCallable)
 	void ServerRefreshTaskTargetFromComponent(UTS_TaskComponent* TriggerTaskComponent, FName RoleSign);
 
-	//是否在数据表上找到了同ID的行数据 尝试通过数据表初始化任务信息（返回找到的行数据）
-	UFUNCTION(BlueprintNativeEvent)
-		bool TryInitTaskInfoFromDataTable(FTaskInfo& DTTaskInfo);
-	virtual bool TryInitTaskInfoFromDataTable_Implementation(FTaskInfo& DTTaskInfo);
+	/*尝试通过数据表初始化任务信息
+	* DataTaskInfo：原始信息，主要使用TaskInfo.TaskID查表。在查询到同ID的数据后会进行覆盖
+	* DTTaskInfo：查找到的表格中的原始信息
+	* return：是否在数据表上找到了同ID的行数据
+	*/
+	UFUNCTION()
+		bool TryInitTaskInfoFromDataTable(FTaskInfo& DataTaskInfo, FTaskInfo& DTTaskInfo);
 
-	//是否在数据表上找到了同ID的行数据 尝试通过数据表初始化任务目标（寻找所需的数据（主要是ID） 返回找到的行数据）
+	//在设置任务时的修改方案：可以通过该函数修改任务信息
 	UFUNCTION(BlueprintNativeEvent)
-		bool TryInitTaskTargetFromDataTable(FTaskTargetInfo& TaskTarget, FTaskTargetInfo& DTTaskTargetInfo);
-	virtual bool TryInitTaskTargetFromDataTable_Implementation(FTaskTargetInfo& TaskTarget, FTaskTargetInfo& DTTaskTargetInfo);
+	FTaskInfo ModifyTaskInfo(FTaskInfo DataTaskInfo);
+		virtual FTaskInfo ModifyTaskInfo_Implementation(FTaskInfo DataTaskInfo);
+
+	/*尝试通过数据表初始化任务目标
+	* DataTaskTarget：原始信息，主要使用DataTaskTarget.TaskTargetID查表。在查询到同ID的数据后会进行覆盖
+	* DTTaskTargetInfo：查找到的表格中的原始信息
+	* return：是否在数据表上找到了同ID的行数据
+	*/
+	UFUNCTION()
+		bool TryInitTaskTargetFromDataTable(FTaskTargetInfo& DataTaskTarget, FTaskTargetInfo& DTTaskTargetInfo);
+
+	//在设置任务时的修改方案：可以通过该函数修改任务信息
+	UFUNCTION(BlueprintNativeEvent)
+	FTaskTargetInfo ModifyTaskTargetInfo(FTaskTargetInfo DataTaskTarget);
+	virtual FTaskTargetInfo ModifyTaskTargetInfo_Implementation(FTaskTargetInfo DataTaskTarget);
 
 	//开始任务
 	UFUNCTION(BlueprintNativeEvent)

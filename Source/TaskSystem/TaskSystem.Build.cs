@@ -26,6 +26,7 @@ public class TaskSystem : ModuleRules
 			new string[]
 			{
 				"Core",
+                "CommonCompare",//该模块依赖另外一个插件
 				// ... add other public dependencies that you statically link with here ...
 			}
 			);
@@ -40,6 +41,7 @@ public class TaskSystem : ModuleRules
 				"SlateCore",
                 "GameplayTags",
                 "DeveloperSettings",
+                //"CommonCompare",//该模块依赖另外一个插件
                 //"Networking",
 				// ... add private dependencies that you statically link with here ...	
 			}
