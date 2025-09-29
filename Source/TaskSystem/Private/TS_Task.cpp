@@ -6,13 +6,19 @@
 #include "TS_TaskCompare.h"
 #include <Common/TS_TaskConfig.h>
 #include "ActorComponent/TS_TaskComponent.h"
+#include <Kismet/GameplayStatics.h>
+#include <GameInstanceSubsystem/TS_GISubsystem.h>
 
 UTS_Task::UTS_Task()
 {
-	if (!TaskComponent)
+	if (AllTaskComponent.Num() == 0)
 	{
-		TaskComponent = Cast<UTS_TaskComponent>(GetOuter());
-		if (!TaskComponent)
+		UTS_TaskComponent* TaskComponent = Cast<UTS_TaskComponent>(GetOuter());
+		if (TaskComponent)
+		{
+			AllTaskComponent.Add(TaskComponent);
+		}
+		if (AllTaskComponent.Num() == 0)
 		{
 			UE_LOG(LogTemp, Warning, TEXT("Task Outer Must Be UTS_TaskComponent Then Can RPC"));
 		}
@@ -51,12 +57,26 @@ void UTS_Task::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetime
 	DOREPLIFETIME(UTS_Task, bTaskIsStart);
 	DOREPLIFETIME(UTS_Task, bTaskIsEnd);
 	DOREPLIFETIME(UTS_Task, RoleSigns);
-	DOREPLIFETIME(UTS_Task, TaskActor);
+
+	DOREPLIFETIME(UTS_Task, bIsShowTaskMark);
+	DOREPLIFETIME(UTS_Task, TaskMarkActors);
+	DOREPLIFETIME(UTS_Task, TaskMarkLocation);
 }
 
 void UTS_Task::ReplicatedUsing_TaskInfoChange()
 {
 	TaskUpdate();
+}
+
+void UTS_Task::ReplicatedUsing_CurUpdateTaskTarget()
+{
+	//客户端的相关函数在同步后调用
+	TArray<FTaskTargetInfo> UpdateTaskTargetArray = CurUpdateTaskTarget;
+	for (FTaskTargetInfo& TaskTargetInfo : UpdateTaskTargetArray)
+	{
+		TaskTargetUpdate(TaskTargetInfo);
+	}
+	CurUpdateTaskTarget.Empty();
 }
 
 void UTS_Task::ReplicatedUsing_bTaskIsStartChange()
@@ -87,9 +107,9 @@ void UTS_Task::ServerRefreshTaskTargetFromInfo(FRefreshTaskTargetInfo RefreshTas
 			//通过比对
 			if (TaskInfo.TaskTargetInfo[i].AddProgress(RefreshTaskTargetInfo.AddProgress, RefreshTaskTargetInfo.RoleSign))//触发客户端的TaskUpdate同步函数
 			{
-				SomeTaskTargetEnd(TaskInfo.TaskTargetInfo[i], true);
+				SomeTaskTargetEnd(TaskInfo.TaskTargetInfo[i], true, RefreshTaskTargetInfo.RoleSign);
 			}
-			TaskUpdate();//服务器调用该函数
+			TaskTargetUpdate(TaskInfo.TaskTargetInfo[i]);//服务器调用该函数
 		}
 		if (TaskInfo.TaskTargetInfo[i].bTaskTargetIsEnd)//目标已经结束
 		{
@@ -221,6 +241,36 @@ void UTS_Task::TaskUpdate_Implementation()
 	TaskUpdateEvent.Broadcast(this);
 }
 
+void UTS_Task::TaskTargetUpdate_Implementation(FTaskTargetInfo UpdateTaskTarget)
+{
+	CurUpdateTaskTarget.Add(UpdateTaskTarget);
+	TaskUpdate();
+
+	//服务器的相关函数通常会立刻调用
+	if (UpdateTaskTarget.bTaskTargetIsEnd)
+	{
+		NetMultiTaskTargetEnd(UpdateTaskTarget, UpdateTaskTarget.TaskTargetIsComplete());
+	}
+	else if (TaskInfo.TaskTargetInfo.Num() > LastAllTaskTargetInfo.Num())
+	{
+		for (int32 i = LastAllTaskTargetInfo.Num(); i < TaskInfo.TaskTargetInfo.Num(); i++)
+		{
+			NetMultiAddNewTaskTarget(TaskInfo.TaskTargetInfo[i]);
+		}
+		LastAllTaskTargetInfo = TaskInfo.TaskTargetInfo;
+	}
+}
+
+void UTS_Task::NetMultiAddNewTaskTarget_Implementation(FTaskTargetInfo NewTaskTarget)
+{
+
+}
+
+void UTS_Task::NetMultiTaskTargetEnd_Implementation(FTaskTargetInfo EndTaskTargetInfo, bool TaskTargetIsComplete)
+{
+
+}
+
 void UTS_Task::TaskEnd_Implementation()
 {
 	//服务器上的任务计时是否结束了
@@ -342,7 +392,7 @@ void UTS_Task::ServerAddTaskTarget_Implementation(FTaskTargetInfo NewTaskTargetI
 		TaskMustDoTargetNum++;
 	}
 	SetTaskTargetTimer(NewTaskTargetInfo);
-	TaskUpdate();
+	TaskTargetUpdate(NewTaskTargetInfo);//添加目标
 }
 
 void UTS_Task::SetTaskTargetTimer(FTaskTargetInfo& TaskTargetInfo)
@@ -396,8 +446,8 @@ void UTS_Task::SomeTaskTargetTimeEnd()
 					{
 						TaskInfo.TaskTargetInfo[i].TaskTargetCurCount = TaskInfo.TaskTargetInfo[i].TaskTargetMaxCount;
 					}
-					SomeTaskTargetEnd(TaskInfo.TaskTargetInfo[i], TaskInfo.TaskTargetInfo[i].bTimeEndComplete);
-					TaskUpdate();//服务器调用更新
+					SomeTaskTargetEnd(TaskInfo.TaskTargetInfo[i], TaskInfo.TaskTargetInfo[i].bTimeEndComplete, "None");
+					TaskTargetUpdate(TaskInfo.TaskTargetInfo[i]);//服务器调用更新
 					GetWorld()->GetTimerManager().ClearTimer(TaskTargetTimeHandle[Key]);
 					TaskTargetTimeHandle.Remove(Key);
 					IsFind = true;
@@ -425,11 +475,34 @@ void UTS_Task::SomeTaskTargetTimeEnd()
 	TaskEndCheckOfParameter(CompleteTaskTargetNum, CompleteTaskTargetNum_MustDo, TaskTargetEndNum);
 }
 
-void UTS_Task::SomeTaskTargetEnd_Implementation(const FTaskTargetInfo& CompleteTaskTarget, bool IsComplete)
+void UTS_Task::SomeTaskTargetEnd_Implementation(const FTaskTargetInfo& CompleteTaskTarget, bool IsComplete, FName RoleSign)
 {
-	for (FTaskChainInfo ChainInfo : CompleteTaskTarget.ChainTaskTargetInfo)//某个任务目标完成了，尝试触发连锁
+	//某个任务目标完成了，尝试触发连锁
+	for (FTaskChainInfo ChainInfo : CompleteTaskTarget.ChainTaskTargetInfo)
 	{
-		if (ChainInfo.bTriggerIsComplete == IsComplete)
+		bool IsChain = false;
+		switch (ChainInfo.TaskChainTriggerType)
+		{
+		case ETS_TaskChainTriggerType::Complete:
+		{
+			IsChain = IsComplete;
+			break;
+		}
+		case ETS_TaskChainTriggerType::Fail:
+		{
+			IsChain = !IsComplete;
+			break;
+		}
+		case ETS_TaskChainTriggerType::End:
+		{
+			IsChain = true;
+			break;
+		}
+		default:
+			break;
+		}
+
+		if (IsChain)
 		{
 			if (ChainInfo.TypeTag == FGameplayTag::RequestGameplayTag("Task.Target"))//添加任务目标
 			{
@@ -437,11 +510,72 @@ void UTS_Task::SomeTaskTargetEnd_Implementation(const FTaskTargetInfo& CompleteT
 			}
 			else if (ChainInfo.TypeTag == FGameplayTag::RequestGameplayTag("Task"))//添加任务
 			{
-				if (TaskComponent)
+				//如果触发者为None 只要添加任务是给与任务相关的所有人那么还可以继续
+				bool IsAddNewTask = RoleSign.IsNone() ? !ChainInfo.bAddTaskToTriggerRole : true;
+				if (IsAddNewTask)
 				{
-					TaskComponent->ServerAddTaskFromID(ChainInfo.ID);
+					UGameInstance* GameInstance = UGameplayStatics::GetGameInstance(this);
+					if (GameInstance)
+					{
+						UTS_GISubsystem* TS_GISubsystem = GameInstance->GetSubsystem<UTS_GISubsystem>();
+						if (TS_GISubsystem)
+						{
+							//生成一个统一的任务
+							UTS_Task* NewTask = TS_GISubsystem->CreateTaskFromID(ChainInfo.ID);
+							if (NewTask)
+							{
+								for (UTS_TaskComponent*& TaskComponent : AllTaskComponent)
+								{
+									if (TaskComponent)
+									{
+										if (!ChainInfo.bAddTaskToTriggerRole)
+										{
+											TaskComponent->ServerAddTask(NewTask);
+										}
+										else if (TaskComponent->GetRoleSign() == RoleSign)
+										{
+											TaskComponent->ServerAddTask(NewTask);
+											break;
+										}
+									}
+								}
+							}
+						}
+					}
 				}
 			}
+		}
+	}
+
+	FTaskTargetInfo TaskTargetInfo = CompleteTaskTarget;
+	//目标在结束时是否要影响任务
+	if (CompleteTaskTarget.bTaskTargetEndTask)
+	{
+		switch (CompleteTaskTarget.TaskTargetEndTaskType)
+		{
+		case ETS_TaskTargetEndTaskType::Follow:
+		{
+			ServerTaskEnd(TaskTargetInfo.TaskTargetIsComplete());
+			break;
+		}
+		case ETS_TaskTargetEndTaskType::Reverse:
+		{
+			ServerTaskEnd(!TaskTargetInfo.TaskTargetIsComplete());
+			break;
+		}
+		case ETS_TaskTargetEndTaskType::AlwaysComplete:
+		{
+			ServerTaskEnd(true);
+			break;
+		}
+		case ETS_TaskTargetEndTaskType::AlwaysFail:
+		{
+			ServerTaskEnd(false);
+			break;
+		}
+		default:
+			break;
+
 		}
 	}
 }
@@ -465,4 +599,46 @@ bool UTS_Task::GetTaskParameterValue(FName ParameterName, float& Value)
 		return true;
 	}
 	return false;
+}
+
+void UTS_Task::NetMultiChangeTaskMarkState(bool ShowOrHide)
+{
+	bIsShowTaskMark = ShowOrHide;
+	if (bIsShowTaskMark)
+	{
+		MarkTaskShow();
+	}
+	else
+	{
+		MarkTaskHide();
+	}
+}
+
+void UTS_Task::RefreshTaskMarkInfo(TArray<AActor*> ActorInfos, TArray<FVector> LocationInfos)
+{
+	TaskMarkActors = ActorInfos;
+	TaskMarkLocation = LocationInfos;
+
+	if (bIsShowTaskMark)
+	{
+		MarkTaskShow();
+	}
+
+	TaskMarkInfoUpdate.Broadcast(TaskMarkActors, TaskMarkLocation);
+}
+
+void UTS_Task::GetTaskMarkInfo(TArray<AActor*>& ActorInfos, TArray<FVector>& LocationInfos)
+{
+	ActorInfos = TaskMarkActors;
+	LocationInfos = TaskMarkLocation;
+}
+
+void UTS_Task::MarkTaskShow_Implementation()
+{
+	
+}
+
+void UTS_Task::MarkTaskHide_Implementation()
+{
+
 }

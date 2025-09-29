@@ -11,6 +11,7 @@
 class UTS_TaskComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FTaskDelegate, UTS_Task*, Task);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FTaskMarkInfoDelegate, const TArray<AActor*>&, TaskMarkActors, const TArray<FVector>&, TaskMarkLocation);//任务标记信息更新
 
 /**
  * 任务类
@@ -31,6 +32,9 @@ public:
 
 	UFUNCTION()
 	void ReplicatedUsing_TaskInfoChange();
+
+	UFUNCTION()
+	void ReplicatedUsing_CurUpdateTaskTarget();
 
 	UFUNCTION()
 	void ReplicatedUsing_bTaskIsStartChange();
@@ -74,17 +78,41 @@ public:
 	FTaskTargetInfo ModifyTaskTargetInfo(FTaskTargetInfo DataTaskTarget);
 	virtual FTaskTargetInfo ModifyTaskTargetInfo_Implementation(FTaskTargetInfo DataTaskTarget);
 
-	//开始任务
+	/*开始任务
+	* 服务器客户端均会调用
+	*/
 	UFUNCTION(BlueprintNativeEvent)
 		void StartTask();
 	virtual void StartTask_Implementation();
 
-	//任务更新 通常是某个目标的进度产生了变换 某个目标结束了 某个目标完成了
+	/*任务更新 TaskInfo更新时触发（任务数据本身发生改变，如任务结束、任务名称修改等），TaskTargetUpdate调用时该函数也会触发
+	* 服务器客户端均会调用
+	*/
 	UFUNCTION(BlueprintNativeEvent)
 		void TaskUpdate();
 	virtual void TaskUpdate_Implementation();
 
-	//任务结束 目标全部完成 / 任务时间到了
+	/*任务目标更新 通常是某个目标被刷新了（进度产生了变换） 新增/移除目标
+	* UpdateTaskTarget：哪个目标导致的更新
+	* 服务器客户端均会调用
+	*/
+	UFUNCTION(BlueprintNativeEvent)
+	void TaskTargetUpdate(FTaskTargetInfo UpdateTaskTarget);
+	virtual void TaskTargetUpdate_Implementation(FTaskTargetInfo UpdateTaskTarget);
+
+	//新增任务目标的多播回调
+	UFUNCTION(BlueprintNativeEvent)
+	void NetMultiAddNewTaskTarget(FTaskTargetInfo NewTaskTarget);
+	virtual void NetMultiAddNewTaskTarget_Implementation(FTaskTargetInfo NewTaskTarget);
+
+	//任务目标结束的多播回调
+	UFUNCTION(BlueprintNativeEvent)
+	void NetMultiTaskTargetEnd(FTaskTargetInfo EndTaskTargetInfo, bool TaskTargetIsComplete);
+	virtual void NetMultiTaskTargetEnd_Implementation(FTaskTargetInfo EndTaskTargetInfo, bool TaskTargetIsComplete);
+
+	/*任务结束 目标全部完成 / 任务时间到了
+	* 服务器客户端均会调用
+	*/
 	UFUNCTION(BlueprintNativeEvent)
 		void TaskEnd();
 	virtual void TaskEnd_Implementation();
@@ -130,15 +158,18 @@ public:
 	UFUNCTION()
 		void SomeTaskTargetTimeEnd();
 
-	//某个任务目标结束 该函数只在服务器调用
-	UFUNCTION(BlueprintNativeEvent)
-		void SomeTaskTargetEnd(const FTaskTargetInfo& CompleteTaskTarget, bool IsComplete);
-	virtual void SomeTaskTargetEnd_Implementation(const FTaskTargetInfo& CompleteTaskTarget, bool IsComplete);
-
-	/*某个任务目标更新的二次检测（该任务目标的信息，触发这次更新的任务目标信息）
-	* 当一个非ID标识 的任务目标tag比对成功时，该函数会被调用：用于二次判断该任务目标是否可以增加进度
-	* 该函数默认实现了Class/Tag/String的对比
+	/*某个任务目标结束 该函数只在服务器调用
+	* 调用情况1：时间自然结束了
+	* 调用情况2：某个人的某个操作导致目标结束（完成/失败）
+	* CompleteTaskTarget：结束的任务目标信息
+	* IsComplete：结束时是否完成
+	* RoleSign：哪个角色导致的结束，如果是自然时间结束该值也为None
 	*/
+	UFUNCTION(BlueprintNativeEvent)
+		void SomeTaskTargetEnd(const FTaskTargetInfo& CompleteTaskTarget, bool IsComplete, FName RoleSign = "None");
+	virtual void SomeTaskTargetEnd_Implementation(const FTaskTargetInfo& CompleteTaskTarget, bool IsComplete, FName RoleSign = "None");
+
+	//某个任务目标更新的比对
 	UFUNCTION(BlueprintNativeEvent)
 		bool SomeTaskTargetUpdateCheck(FTaskTargetInfo CheckTaskTarget, FRefreshTaskTargetInfo RefreshTaskTargetInfo);
 	virtual bool SomeTaskTargetUpdateCheck_Implementation(FTaskTargetInfo CheckTaskTarget, FRefreshTaskTargetInfo RefreshTaskTargetInfo);
@@ -146,6 +177,41 @@ public:
 	//获取任务参数
 	UFUNCTION(BlueprintPure)
 	bool GetTaskParameterValue(FName ParameterName,float& Value);
+
+	/*改变任务标记状态，外部调用（如在任务界面点击追踪/标记）
+	* ShowOrHide：该值为true时显示标记，该值为false时隐藏标记
+	* 因为任务本身（Object）不支持RPC函数，这里利用任务组件进行多播
+	*/
+	UFUNCTION(BlueprintCallable)
+	void NetMultiChangeTaskMarkState(bool ShowOrHide);
+
+	/*刷新任务标记信息
+	* 这里只是设置，在真正显示的时候获得该值进行显示
+	* 无论是否需要显示标记，该函数都应该在合适的时机进行设置（如任务目标位置发生了改变）
+	*/
+	UFUNCTION(BlueprintCallable)
+	void RefreshTaskMarkInfo(TArray<AActor*> ActorInfos, TArray<FVector> LocationInfos);
+
+	//获取当前任务标记信息
+	UFUNCTION(BlueprintPure)
+	void GetTaskMarkInfo(TArray<AActor*>& ActorInfos, TArray<FVector>& LocationInfos);
+
+	/*标记任务显示
+	* 当ChangeTaskMarkState或SetTaskMarkInfo被调用时，若bIsShowTaskMark为true，该函数会被调用
+	* 由子类去完成如何根据任务标记信息GetTaskMarkInfo()显示
+	*/
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
+		void MarkTaskShow();
+	virtual void MarkTaskShow_Implementation();
+
+	/*标记任务隐藏
+	* 当ChangeTaskMarkState被调用时，若bIsShowTaskMark为false，该函数会被调用
+	* 当任务类被删除时也需要调用该函数会进行清除
+	* 由子类去完成如何隐藏/删除任务标记显示
+	*/
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
+		void MarkTaskHide();
+	virtual void MarkTaskHide_Implementation();
 public:
 	
 	UPROPERTY(BlueprintAssignable)
@@ -155,12 +221,15 @@ public:
 	UPROPERTY(BlueprintAssignable)
 		FTaskDelegate TaskEndEvent;
 
-	//任务信息
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated, ReplicatedUsing = ReplicatedUsing_TaskInfoChange, Meta = (ExposeOnSpawn = True))
-		FTaskInfo TaskInfo;
 	//任务的唯一ID
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated)
-		int32 TaskUniqueID;
+	int32 TaskUniqueID;
+	//任务信息
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated, ReplicatedUsing = ReplicatedUsing_TaskInfoChange, Meta = (ExposeOnSpawn = True))
+	FTaskInfo TaskInfo;
+	//“上次”的全部任务目标
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TArray<FTaskTargetInfo> LastAllTaskTargetInfo;
 
 	//任务拥有必做目标的数量
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated)
@@ -176,7 +245,7 @@ public:
 		bool bTaskIsEnd = false;
 
 	UPROPERTY(BlueprintReadOnly)
-		UTS_TaskComponent* TaskComponent;
+		TArray<UTS_TaskComponent*> AllTaskComponent;
 
 	//接取该任务的单位签名
 	UPROPERTY(BlueprintReadWrite, Replicated)
@@ -189,11 +258,25 @@ public:
 	UPROPERTY()
 		TMap<FString, FTimerHandle> TaskTargetTimeHandle;
 
-	//任务相关单位 （显示距离等等信息）
+	//任务标记显示状态
 	UPROPERTY(BlueprintReadWrite, Replicated)
-		TArray<AActor*> TaskActor;
+		bool bIsShowTaskMark = false;
+	//任务标记的Actor信息
+	UPROPERTY(BlueprintReadWrite, Replicated)
+		TArray<AActor*> TaskMarkActors;
+	//任务标记的位置信息
+	UPROPERTY(BlueprintReadWrite, Replicated)
+		TArray<FVector> TaskMarkLocation;
+
+	UPROPERTY(BlueprintAssignable)
+		FTaskMarkInfoDelegate TaskMarkInfoUpdate;
 
 	//任务参数<参数名，参数>
 	UPROPERTY(BlueprintReadWrite)
 		TMap<FName,float> TaskParameter;
+
+	/*当前导致TaskTargetUpdate触发的任务目标信息
+	*/
+	UPROPERTY(BlueprintReadWrite, Replicated, ReplicatedUsing = ReplicatedUsing_CurUpdateTaskTarget)
+	TArray<FTaskTargetInfo> CurUpdateTaskTarget;
 };

@@ -164,6 +164,15 @@ public:
 	float Value;
 };
 
+//任务目标结束任务类型
+UENUM(BlueprintType)
+enum class ETS_TaskChainTriggerType :uint8
+{
+	Complete = 0 UMETA(DisplayName = "完成时触发"),
+	Fail UMETA(DisplayName = "失败时触发"),
+	End UMETA(DisplayName = "结束时触发")
+};
+
 /*任务连锁信息
 * 在任务/任务目标完成/失败时通过该信息自动补充内容（任务/任务目标）
 */
@@ -172,11 +181,10 @@ struct FTaskChainInfo
 {
 	GENERATED_BODY()
 public:
-	/*该连锁信息是在完成时触发吗
-	* 该值为false时在失败是触发
-	*/
+	//连锁信息触发的类型
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bTriggerIsComplete = true;
+	ETS_TaskChainTriggerType TaskChainTriggerType = ETS_TaskChainTriggerType::Complete;
+	
 
 	//类型Tag  是任务还是任务目标
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (Categories = "Task"))
@@ -185,6 +193,23 @@ public:
 	//要触发的内容（任务/任务目标）ID
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	int32 ID;
+
+	/*添加任务的决策，该值需要TypeTag = Task
+	* 该值为true时：只给触发导致任务目标结束的那个角色添加
+	* 该值为false时：给拥有这个任务的全部角色添加
+	*/
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bAddTaskToTriggerRole = true;
+};
+
+//任务目标结束任务类型
+UENUM(BlueprintType)
+enum class ETS_TaskTargetEndTaskType :uint8
+{
+	Follow = 0 UMETA(DisplayName = "跟随-目标完成/失败 则任务完成/失败"),
+	Reverse UMETA(DisplayName = "反转-目标完成/失败 则任务失败/完成"),
+	AlwaysComplete UMETA(DisplayName = "结束即完成"),
+	AlwaysFail UMETA(DisplayName = "结束即失败")
 };
 
 /*任务目标
@@ -194,6 +219,7 @@ struct FTaskTargetInfo : public FTableRowBase
 {
 	GENERATED_BODY()
 public:
+
 	virtual void OnDataTableChanged(const UDataTable* InDataTable, const FName InRowName) override
 	{
 		FTaskTargetInfo* TaskTargetInfo = InDataTable->FindRow<FTaskTargetInfo>(InRowName, TEXT(""));
@@ -290,8 +316,10 @@ public:
 
 	/*任务目标ID 在任务目标ID之间唯一，不可重复
 	* 如果填写了ID，在UTS_Task的StartTask中会读取数据表初始化任务属性，将除了TaskTargetText的属性进行刷新
+	* 注意：如果该值为【0】表示无效目标，在UTS_Task::TaskUpdate()更新时可能会传递
+	* 注意：当bIsCustom为true时，虽然任务框架不会读取，但该值可以任意填写（建议负数，避免和真正的目标ID重复）自行使用（例如自行填写ID进行区分）
 	*/
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditConditionHides, EditCondition = "!bIsCustom"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	int32 TaskTargetID;
 
 	/*任务目标的时长（秒）该值为0.0f时表示无限时长
@@ -299,15 +327,23 @@ public:
 	*/
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float TaskTargetTime = -1.0f;
-	//目标在时间结束时是否视为完成
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool bTimeEndComplete = false;
 
 	/*任务目标的描述
 	该值有效且bIsCustom为false时，可以覆盖表数据的参数
 	*/
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FText TaskTargetText;
+
+	//目标在时间结束时是否视为完成
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bTimeEndComplete = false;
+
+	//目标在结束时是否要影响任务
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bTaskTargetEndTask = false;
+	//任务目标结束任务的类型
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditConditionHides, EditCondition = "bTaskTargetEndTask"))
+	ETS_TaskTargetEndTaskType TaskTargetEndTaskType = ETS_TaskTargetEndTaskType::Follow;
 
 	/*任务目标Tag  目标类型(是否是必做任务);目标所在地
 	* 该值有效且bIsCustom为false时，可以覆盖表数据的参数
@@ -335,9 +371,12 @@ public:
 	//任务目标的对照结构信息是否需要覆盖 同时在目标本身上表示着是否开启除了ID之外的其他检测方式
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bCompareInfoIsOverride = false;
+
 	////任务目标对照结构信息* 已经废弃，勿用
 	//UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditConditionHides, EditCondition = "bCompareInfoIsOverride"))
 	//FTaskCompareInfo TaskTargetCompareInfo;
+	
+
 	//被比对信息
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditConditionHides, EditCondition = "bCompareInfoIsOverride"))
 	FCC_BeCompareInfo BeCompareInfo;

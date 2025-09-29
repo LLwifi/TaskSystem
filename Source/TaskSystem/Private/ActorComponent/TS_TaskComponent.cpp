@@ -92,6 +92,15 @@ void UTS_TaskComponent::ReplicatedUsing_AllTaskChange()
 
 }
 
+FName UTS_TaskComponent::GetRoleSign()
+{
+	if (TaskRoleSign.IsNone())
+	{
+		return FName(UKismetSystemLibrary::GetDisplayName(this));
+	}
+	return TaskRoleSign;
+}
+
 void UTS_TaskComponent::SetTaskRole(ETS_TaskRole RoleType)
 {
 	TaskRole = RoleType;
@@ -109,9 +118,9 @@ void UTS_TaskComponent::ServerAddTask_Implementation(UTS_Task* NewTask)
 {
 	if (NewTask)
 	{
-		NewTask->RoleSigns.Add(TaskRoleSign);
+		NewTask->RoleSigns.Add(GetRoleSign());
 		AllTask.Add(NewTask);
-		NewTask->TaskComponent = this;
+		NewTask->AllTaskComponent.Add(this);
 		NewTask->StartTask();//服务器调用该函数
 		AddTaskEvent.Broadcast(this, NewTask);
 	}
@@ -200,5 +209,14 @@ bool UTS_TaskComponent::GetTaskOfID(int32 TaskID, UTS_Task*& Task)
 	}
 	return false;
 }
+
+void UTS_TaskComponent::NetMultiChangeTaskMarkStateFromTask_Implementation(UTS_Task* Task, bool ShowOrHide)
+{
+	if (Task)
+	{
+		Task->NetMultiChangeTaskMarkState(ShowOrHide);
+	}
+}
+
 
 

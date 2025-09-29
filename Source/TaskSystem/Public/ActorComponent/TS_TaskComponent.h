@@ -19,7 +19,7 @@ enum class ETS_TaskRole :uint8
 	People UMETA(DisplayName = "People-与任务相关的单位")
 };
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FTaskComponentDelegate, UTS_TaskComponent*, TaskComponent,  UTS_Task*, Task);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FTaskComponentDelegate, UTS_TaskComponent*, AllTaskComponent,  UTS_Task*, Task);
 
 /*任务组件
 * 处理任务
@@ -52,9 +52,13 @@ public:
 	UFUNCTION()
 	void ReplicatedUsing_AllTaskChange();
 
+	//获取签名
+	UFUNCTION(BlueprintPure)
+	FName GetRoleSign();
+
 	//设置任务角色
 	UFUNCTION(BlueprintCallable)
-	void SetTaskRole(ETS_TaskRole RoleType);
+		void SetTaskRole(ETS_TaskRole RoleType);
 
 	//添加任务
 	UFUNCTION(BlueprintCallable, Server, Reliable)
@@ -82,11 +86,15 @@ public:
 	UFUNCTION(BlueprintCallable, Server, Reliable)
 		void ServerRefreshTaskTargetFromComponent(UTS_TaskComponent* TriggerTaskComponent, FName RoleSign);
 
-
 	//通过ID获取当前接取的任务
 	UFUNCTION(BlueprintPure)
 		bool GetTaskOfID(int32 TaskID, UTS_Task*& Task);
 		
+	/*多播 通过任务改变标记状态
+	* 因为任务本身（Object）不支持RPC函数，这里利用组件进行多播
+	*/
+	UFUNCTION(BlueprintCallable, NetMulticast, Reliable)
+	void NetMultiChangeTaskMarkStateFromTask(UTS_Task* Task, bool ShowOrHide);
 public:
 
 	UPROPERTY(BlueprintAssignable)
