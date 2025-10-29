@@ -173,43 +173,132 @@ enum class ETS_TaskChainTriggerType :uint8
 	End UMETA(DisplayName = "结束时触发")
 };
 
+//任务相关类型
+UENUM(BlueprintType)
+enum class ETS_TaskRelatedType :uint8
+{
+	Task = 0 UMETA(DisplayName = "任务"),
+	TaskTarget UMETA(DisplayName = "任务目标")
+};
+
+/*任务相关的Handle
+* 可以用该结构图定位一个任务或任务目标
+*/
+USTRUCT(BlueprintType)
+struct FTS_TaskRelatedHandle
+{
+	GENERATED_BODY()
+public:
+	FTS_TaskRelatedHandle(){}
+	FTS_TaskRelatedHandle(ETS_TaskRelatedType TaskRelatedType){ Type = TaskRelatedType;}
+public:
+	//类型
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	ETS_TaskRelatedType Type = ETS_TaskRelatedType::TaskTarget;
+
+	//任务/任务目标 ID
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	int32 ID = -1;
+};
+
+//连锁结束类型
+UENUM(BlueprintType)
+enum class ETS_ChainEndType :uint8
+{
+	Follow = 0 UMETA(DisplayName = "跟随-目标完成/失败 则任务完成/失败"),
+	Reverse UMETA(DisplayName = "反转-目标完成/失败 则任务失败/完成"),
+	AlwaysComplete UMETA(DisplayName = "结束即完成"),
+	AlwaysFail UMETA(DisplayName = "结束即失败")
+};
+
+/*任务一次连锁信息
+* 在任务结束时通过该信息影响其他任务/任务目标
+*/
+USTRUCT(BlueprintType)
+struct FTaskOnceChainInfo
+{
+	GENERATED_BODY()
+public:
+	int32 GetTaskID(){ return ChainTaskHandle.ID; }
+	int32 GetTaskTargetID() { return ChainTaskTargetHandle.ID; }
+public:
+
+	//是否自动获取连锁的任务ID 通常自动获取的是触发该连锁的那个任务ID
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (PinHiddenByDefault, InlineEditConditionToggle))
+	bool AutoGetChainTaskID = true;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditCondition = "!AutoGetChainTaskID"))
+	FTS_TaskRelatedHandle ChainTaskHandle = FTS_TaskRelatedHandle(ETS_TaskRelatedType::Task);
+
+	//是否自动获取连锁的任务目标ID 通常自动获取的是触发该连锁的那个任务目标ID
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (PinHiddenByDefault, InlineEditConditionToggle))
+	bool AutoGetChainTaskTargetID = true;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditCondition = "!AutoGetChainTaskTargetID"))
+	FTS_TaskRelatedHandle ChainTaskTargetHandle = FTS_TaskRelatedHandle(ETS_TaskRelatedType::TaskTarget);
+
+	//我如何影响连锁的内容
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	ETS_ChainEndType ChainEndType = ETS_ChainEndType::Follow;
+};
+
 /*任务连锁信息
-* 在任务/任务目标完成/失败时通过该信息自动补充内容（任务/任务目标）
+* 在任务结束时通过该信息影响其他任务/任务目标
 */
 USTRUCT(BlueprintType)
 struct FTaskChainInfo
 {
 	GENERATED_BODY()
 public:
+	int32 Num(){ return AllTaskChainInfo.Num(); }
+
+	void AutoSetID(int32 TaskID, int32 TaskTargetID)
+	{
+		for (FTaskOnceChainInfo& Info : AllTaskChainInfo)
+		{
+			if (Info.AutoGetChainTaskID)
+			{
+				Info.ChainTaskHandle.ID = TaskID;
+			}
+			if (Info.AutoGetChainTaskTargetID)
+			{
+				Info.ChainTaskTargetHandle.ID = TaskTargetID;
+			}
+		}
+	}
+
+public:
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TArray<FTaskOnceChainInfo> AllTaskChainInfo;
+};
+
+/*任务连锁添加信息
+* 在任务/任务目标结束时通过该信息自动补充新的内容（任务/任务目标）
+*/
+USTRUCT(BlueprintType)
+struct FTaskChainAddInfo
+{
+	GENERATED_BODY()
+public:
 	//连锁信息触发的类型
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	ETS_TaskChainTriggerType TaskChainTriggerType = ETS_TaskChainTriggerType::Complete;
-	
 
-	//类型Tag  是任务还是任务目标
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (Categories = "Task"))
-	FGameplayTag TypeTag = FGameplayTag::RequestGameplayTag("Task.Target");
-
-	//要触发的内容（任务/任务目标）ID
+	//要添加的任务相关
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	int32 ID;
+	FTS_TaskRelatedHandle AddTaskRelatedHandle;
 
-	/*添加任务的决策，该值需要TypeTag = Task
+	/*添加任务的决策，该值需要AddTaskRelatedHandle.Type == ETS_TaskRelatedType::Task 时才有效
 	* 该值为true时：只给触发导致任务目标结束的那个角色添加
 	* 该值为false时：给拥有这个任务的全部角色添加
 	*/
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bAddTaskToTriggerRole = true;
-};
 
-//任务目标结束任务类型
-UENUM(BlueprintType)
-enum class ETS_TaskTargetEndTaskType :uint8
-{
-	Follow = 0 UMETA(DisplayName = "跟随-目标完成/失败 则任务完成/失败"),
-	Reverse UMETA(DisplayName = "反转-目标完成/失败 则任务失败/完成"),
-	AlwaysComplete UMETA(DisplayName = "结束即完成"),
-	AlwaysFail UMETA(DisplayName = "结束即失败")
+	/*连锁的任务/任务目标 信息
+	* 注意：该值只有当AddTaskRelatedHandle 的 Type = Task 时才有效
+	*/
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FTaskChainInfo AllChainInfo;
 };
 
 /*任务目标
@@ -257,12 +346,11 @@ public:
 		if (!bCompareInfoIsOverride)
 		{
 			bCompareInfoIsOverride = TaskTargetInfo.bCompareInfoIsOverride;
-			//TaskTargetCompareInfo = TaskTargetInfo.TaskTargetCompareInfo;
 			BeCompareInfo = TaskTargetInfo.BeCompareInfo;
 		}
-		if (ChainTaskTargetInfo.Num() == 0)
+		if (ChainAddInfo.Num() == 0)
 		{
-			ChainTaskTargetInfo = TaskTargetInfo.ChainTaskTargetInfo;
+			ChainAddInfo = TaskTargetInfo.ChainAddInfo;
 		}
 		if (TaskTargetParameter.Num() == 0)
 		{
@@ -338,12 +426,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bTimeEndComplete = false;
 
-	//目标在结束时是否要影响任务
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	//目标在结束时是否要影响所属任务
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (PinHiddenByDefault, InlineEditConditionToggle))
 	bool bTaskTargetEndTask = false;
 	//任务目标结束任务的类型
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditConditionHides, EditCondition = "bTaskTargetEndTask"))
-	ETS_TaskTargetEndTaskType TaskTargetEndTaskType = ETS_TaskTargetEndTaskType::Follow;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditCondition = "bTaskTargetEndTask"))
+	ETS_ChainEndType TaskTargetEndTaskType = ETS_ChainEndType::Follow;
 
 	/*任务目标Tag  目标类型(是否是必做任务);目标所在地
 	* 该值有效且bIsCustom为false时，可以覆盖表数据的参数
@@ -385,7 +473,7 @@ public:
 	* 该值有效且bIsCustom为false时，可以覆盖表数据的参数
 	*/
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	TArray<FTaskChainInfo> ChainTaskTargetInfo;
+	TArray<FTaskChainAddInfo> ChainAddInfo;
 
 	/*任务相关参数
 	* 任务目标和任务均配置了同名参数时，优先获取TaskOverrideParameter
@@ -408,9 +496,6 @@ public:
 	*/
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	int32 RefreshTaskTargetID = -1;
-	////任务目标对照结构信息* 已经废弃，勿用
-	//UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	//FTaskCompareInfo TaskTargetCompareInfo;
 	//对比信息
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FCC_CompareInfo CompareInfo;

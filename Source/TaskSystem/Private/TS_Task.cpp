@@ -61,6 +61,8 @@ void UTS_Task::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetime
 	DOREPLIFETIME(UTS_Task, bIsShowTaskMark);
 	DOREPLIFETIME(UTS_Task, TaskMarkActors);
 	DOREPLIFETIME(UTS_Task, TaskMarkLocation);
+	DOREPLIFETIME(UTS_Task, CurUpdateTaskTarget);
+	DOREPLIFETIME(UTS_Task, TaskChainInfo);
 }
 
 void UTS_Task::ReplicatedUsing_TaskInfoChange()
@@ -89,6 +91,20 @@ void UTS_Task::ReplicatedUsing_bTaskIsEndChange()
 	TaskEnd();
 }
 
+void UTS_Task::ServerRefreshOneTaskTargetFromInfo(FRefreshTaskTargetInfo RefreshTaskTargetInfo, UPARAM(Ref)FTaskTargetInfo& TaskTargetInfo)
+{
+	if (!TaskTargetInfo.bTaskTargetIsEnd && (RefreshTaskTargetInfo.RefreshTaskTargetID == TaskTargetInfo.TaskTargetID ||//ID相同直接通过
+		(TaskTargetInfo.bCompareInfoIsOverride && SomeTaskTargetUpdateCheck(TaskTargetInfo, RefreshTaskTargetInfo))))//开启除了ID之外的其他检测方式 && 经过自定义的二次比对后可以增加进度
+	{
+		//通过比对
+		if (TaskTargetInfo.AddProgress(RefreshTaskTargetInfo.AddProgress, RefreshTaskTargetInfo.RoleSign))//触发客户端的TaskUpdate同步函数
+		{
+			SomeTaskTargetEnd(TaskTargetInfo, true, RefreshTaskTargetInfo.RoleSign);
+		}
+		TaskTargetUpdate(TaskTargetInfo);//服务器调用该函数
+	}
+}
+
 void UTS_Task::ServerRefreshTaskTargetFromInfo(FRefreshTaskTargetInfo RefreshTaskTargetInfo)
 {
 	if (bTaskIsEnd)//已经结束的任务不应该再判断了
@@ -101,16 +117,7 @@ void UTS_Task::ServerRefreshTaskTargetFromInfo(FRefreshTaskTargetInfo RefreshTas
 	int32 TaskTargetEndNum = 0;//结束的任务目标数量
 	for (int32 i = 0; i < AllTaskTargetInfo.Num(); i++)
 	{
-		if (!TaskInfo.TaskTargetInfo[i].bTaskTargetIsEnd && (RefreshTaskTargetInfo.RefreshTaskTargetID == TaskInfo.TaskTargetInfo[i].TaskTargetID ||//ID相同直接通过
-			(TaskInfo.TaskTargetInfo[i].bCompareInfoIsOverride && SomeTaskTargetUpdateCheck(TaskInfo.TaskTargetInfo[i], RefreshTaskTargetInfo))))//开启除了ID之外的其他检测方式 && 经过自定义的二次比对后可以增加进度
-		{
-			//通过比对
-			if (TaskInfo.TaskTargetInfo[i].AddProgress(RefreshTaskTargetInfo.AddProgress, RefreshTaskTargetInfo.RoleSign))//触发客户端的TaskUpdate同步函数
-			{
-				SomeTaskTargetEnd(TaskInfo.TaskTargetInfo[i], true, RefreshTaskTargetInfo.RoleSign);
-			}
-			TaskTargetUpdate(TaskInfo.TaskTargetInfo[i]);//服务器调用该函数
-		}
+		ServerRefreshOneTaskTargetFromInfo(RefreshTaskTargetInfo, TaskInfo.TaskTargetInfo[i]);
 		if (TaskInfo.TaskTargetInfo[i].bTaskTargetIsEnd)//目标已经结束
 		{
 			TaskTargetEndNum++;
@@ -294,9 +301,71 @@ void UTS_Task::TaskEnd_Implementation()
 
 void UTS_Task::ServerTaskEnd(bool IsComplete/* = true*/)
 {
-	bTaskIsComplete = IsComplete;
-	bTaskIsEnd = true;//触发客户端的TaskEnd同步函数
-	TaskEnd();//服务器调用该函数
+	if (!bTaskIsEnd)//避免多次触发
+	{
+		bTaskIsComplete = IsComplete;
+		bTaskIsEnd = true;//触发客户端的TaskEnd同步函数
+		TaskEnd();//服务器调用该函数
+
+		//连锁任务处理
+		for (FTaskOnceChainInfo& OneChainInfo : TaskChainInfo.AllTaskChainInfo)
+		{
+			for (UTS_TaskComponent*& TSCom : AllTaskComponent)//拥有“我”这个任务的全部组件
+			{
+				UTS_Task* ChainTask;
+				if (TSCom->GetTaskOfID(OneChainInfo.ChainTaskHandle.ID, ChainTask) && ChainTask)
+				{
+					//找到任务后判断是影响任务本身还是任务上的某个目标
+					FTaskTargetInfo* ChainTaskTargetInfo;
+					bool ChainIsComplete = bTaskIsComplete;//影响的结果
+					if (OneChainInfo.ChainTaskTargetHandle.ID == -1)//影响任务
+					{
+						switch (OneChainInfo.ChainEndType)
+						{
+						case ETS_ChainEndType::Follow:
+						{
+							ChainIsComplete = bTaskIsComplete;
+							break;
+						}
+						case ETS_ChainEndType::Reverse:
+						{
+							ChainIsComplete = !bTaskIsComplete;
+							break;
+						}
+						case ETS_ChainEndType::AlwaysComplete:
+						{
+							ChainIsComplete = bTaskIsEnd;
+							break;
+						}
+						case ETS_ChainEndType::AlwaysFail:
+						{
+							ChainIsComplete = !bTaskIsEnd;
+							break;
+						}
+						default:
+							break;
+						}
+						ChainTask->ServerTaskEnd(ChainIsComplete);
+					}
+					else if(ChainTask->GetTaskTargetFromID(OneChainInfo.ChainTaskTargetHandle.ID, ChainTaskTargetInfo))//影响任务上的某个目标
+					{
+						FRefreshTaskTargetInfo RefreshInfo;
+						RefreshInfo.RefreshTaskTargetID = OneChainInfo.ChainTaskTargetHandle.ID;
+						RefreshInfo.AddProgress = ChainTaskTargetInfo->TaskTargetMaxCount;
+						for (UTS_TaskComponent*& Com :AllTaskComponent)//获取一个有效的任务签名
+						{
+							if (Com)
+							{
+								RefreshInfo.RoleSign = Com->GetRoleSign();
+								break;
+							}
+						}
+						ChainTask->ServerRefreshOneTaskTargetFromInfo(RefreshInfo, *ChainTaskTargetInfo);
+					}
+				}
+			}
+		}
+	}
 }
 
 void UTS_Task::TaskEndCheck()
@@ -478,10 +547,11 @@ void UTS_Task::SomeTaskTargetTimeEnd()
 void UTS_Task::SomeTaskTargetEnd_Implementation(const FTaskTargetInfo& CompleteTaskTarget, bool IsComplete, FName RoleSign)
 {
 	//某个任务目标完成了，尝试触发连锁
-	for (FTaskChainInfo ChainInfo : CompleteTaskTarget.ChainTaskTargetInfo)
+	for (FTaskChainAddInfo ChainAddInfo : CompleteTaskTarget.ChainAddInfo)
 	{
+		ChainAddInfo.AllChainInfo.AutoSetID(TaskInfo.TaskID, CompleteTaskTarget.TaskTargetID);//尝试刷新ID数据
 		bool IsChain = false;
-		switch (ChainInfo.TaskChainTriggerType)
+		switch (ChainAddInfo.TaskChainTriggerType)
 		{
 		case ETS_TaskChainTriggerType::Complete:
 		{
@@ -504,14 +574,12 @@ void UTS_Task::SomeTaskTargetEnd_Implementation(const FTaskTargetInfo& CompleteT
 
 		if (IsChain)
 		{
-			if (ChainInfo.TypeTag == FGameplayTag::RequestGameplayTag("Task.Target"))//添加任务目标
+			switch (ChainAddInfo.AddTaskRelatedHandle.Type)
 			{
-				ServerAddTaskTargetOfID(ChainInfo.ID);
-			}
-			else if (ChainInfo.TypeTag == FGameplayTag::RequestGameplayTag("Task"))//添加任务
+			case ETS_TaskRelatedType::Task:
 			{
 				//如果触发者为None 只要添加任务是给与任务相关的所有人那么还可以继续
-				bool IsAddNewTask = RoleSign.IsNone() ? !ChainInfo.bAddTaskToTriggerRole : true;
+				bool IsAddNewTask = RoleSign.IsNone() ? !ChainAddInfo.bAddTaskToTriggerRole : true;
 				if (IsAddNewTask)
 				{
 					UGameInstance* GameInstance = UGameplayStatics::GetGameInstance(this);
@@ -521,20 +589,20 @@ void UTS_Task::SomeTaskTargetEnd_Implementation(const FTaskTargetInfo& CompleteT
 						if (TS_GISubsystem)
 						{
 							//生成一个统一的任务
-							UTS_Task* NewTask = TS_GISubsystem->CreateTaskFromID(ChainInfo.ID);
+							UTS_Task* NewTask = TS_GISubsystem->CreateTaskFromID(ChainAddInfo.AddTaskRelatedHandle.ID);
 							if (NewTask)
 							{
 								for (UTS_TaskComponent*& TaskComponent : AllTaskComponent)
 								{
 									if (TaskComponent)
 									{
-										if (!ChainInfo.bAddTaskToTriggerRole)
+										if (!ChainAddInfo.bAddTaskToTriggerRole)
 										{
-											TaskComponent->ServerAddTask(NewTask);
+											TaskComponent->ServerAddTask(NewTask, ChainAddInfo.AllChainInfo);
 										}
 										else if (TaskComponent->GetRoleSign() == RoleSign)
 										{
-											TaskComponent->ServerAddTask(NewTask);
+											TaskComponent->ServerAddTask(NewTask, ChainAddInfo.AllChainInfo);
 											break;
 										}
 									}
@@ -543,6 +611,15 @@ void UTS_Task::SomeTaskTargetEnd_Implementation(const FTaskTargetInfo& CompleteT
 						}
 					}
 				}
+				break;
+			}
+			case ETS_TaskRelatedType::TaskTarget:
+			{
+				ServerAddTaskTargetOfID(ChainAddInfo.AddTaskRelatedHandle.ID);
+				break;
+			}
+			default:
+				break;
 			}
 		}
 	}
@@ -553,22 +630,22 @@ void UTS_Task::SomeTaskTargetEnd_Implementation(const FTaskTargetInfo& CompleteT
 	{
 		switch (CompleteTaskTarget.TaskTargetEndTaskType)
 		{
-		case ETS_TaskTargetEndTaskType::Follow:
+		case ETS_ChainEndType::Follow:
 		{
 			ServerTaskEnd(TaskTargetInfo.TaskTargetIsComplete());
 			break;
 		}
-		case ETS_TaskTargetEndTaskType::Reverse:
+		case ETS_ChainEndType::Reverse:
 		{
 			ServerTaskEnd(!TaskTargetInfo.TaskTargetIsComplete());
 			break;
 		}
-		case ETS_TaskTargetEndTaskType::AlwaysComplete:
+		case ETS_ChainEndType::AlwaysComplete:
 		{
 			ServerTaskEnd(true);
 			break;
 		}
-		case ETS_TaskTargetEndTaskType::AlwaysFail:
+		case ETS_ChainEndType::AlwaysFail:
 		{
 			ServerTaskEnd(false);
 			break;
@@ -641,4 +718,17 @@ void UTS_Task::MarkTaskShow_Implementation()
 void UTS_Task::MarkTaskHide_Implementation()
 {
 
+}
+
+bool UTS_Task::GetTaskTargetFromID(int32 ID, FTaskTargetInfo*& TaskTargetInfo)
+{
+	for (FTaskTargetInfo& TaskTarget : TaskInfo.TaskTargetInfo)
+	{
+		if (TaskTarget.TaskTargetID == ID)
+		{
+			TaskTargetInfo = &TaskTarget;
+			return true;
+		}
+	}
+	return false;
 }

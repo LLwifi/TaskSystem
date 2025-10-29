@@ -62,15 +62,15 @@ public:
 
 	//添加任务
 	UFUNCTION(BlueprintCallable, Server, Reliable)
-		void ServerAddTask(UTS_Task* NewTask);
+		void ServerAddTask(UTS_Task* NewTask, FTaskChainInfo TaskChainInfo = FTaskChainInfo());
 
 	//通过任务ID添加任务
 	UFUNCTION(BlueprintCallable, Server, Reliable)
-		void ServerAddTaskFromID(int32 TaskID);
+		void ServerAddTaskFromID(int32 TaskID, FTaskChainInfo TaskChainInfo = FTaskChainInfo());
 
 	//通过任务信息添加任务
 	UFUNCTION(BlueprintCallable, Server, Reliable)
-		void ServerAddTaskFromInfo(FTaskInfo TaskInfo);
+		void ServerAddTaskFromInfo(FTaskInfo TaskInfo, FTaskChainInfo TaskChainInfo = FTaskChainInfo());
 
 	//结束任务（任务ID 是否属于完成结束）
 	UFUNCTION(BlueprintCallable, Server, Reliable)

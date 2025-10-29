@@ -42,6 +42,9 @@ public:
 	UFUNCTION()
 	void ReplicatedUsing_bTaskIsEndChange();
 
+	//通过信息刷新单个任务目标 该函数需要在服务器调用
+	UFUNCTION(BlueprintCallable)
+	void ServerRefreshOneTaskTargetFromInfo(FRefreshTaskTargetInfo RefreshTaskTargetInfo, UPARAM(Ref)FTaskTargetInfo& TaskTargetInfo);
 	//通过信息刷新任务目标 该函数需要在服务器调用
 	UFUNCTION(BlueprintCallable)
 	void ServerRefreshTaskTargetFromInfo(FRefreshTaskTargetInfo RefreshTaskTargetInfo);
@@ -212,6 +215,10 @@ public:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
 		void MarkTaskHide();
 	virtual void MarkTaskHide_Implementation();
+
+	//通过ID获取该任务上的任务目标
+	//UFUNCTION(BlueprintPure)
+	bool GetTaskTargetFromID(int32 ID, FTaskTargetInfo*& TaskTargetInfo);
 public:
 	
 	UPROPERTY(BlueprintAssignable)
@@ -244,6 +251,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, ReplicatedUsing = ReplicatedUsing_bTaskIsEndChange)
 		bool bTaskIsEnd = false;
 
+	//拥有该任务的全部组件
 	UPROPERTY(BlueprintReadOnly)
 		TArray<UTS_TaskComponent*> AllTaskComponent;
 
@@ -279,4 +287,8 @@ public:
 	*/
 	UPROPERTY(BlueprintReadWrite, Replicated, ReplicatedUsing = ReplicatedUsing_CurUpdateTaskTarget)
 	TArray<FTaskTargetInfo> CurUpdateTaskTarget;
+
+	//任务的连锁信息
+	UPROPERTY(BlueprintReadWrite, Replicated)
+	FTaskChainInfo TaskChainInfo;
 };

@@ -114,10 +114,11 @@ void UTS_TaskComponent::SetTaskRole(ETS_TaskRole RoleType)
 	}
 }
 
-void UTS_TaskComponent::ServerAddTask_Implementation(UTS_Task* NewTask)
+void UTS_TaskComponent::ServerAddTask_Implementation(UTS_Task* NewTask, FTaskChainInfo TaskChainInfo/* = FTaskChainInfo()*/)
 {
 	if (NewTask)
 	{
+		NewTask->TaskChainInfo = TaskChainInfo;
 		NewTask->RoleSigns.Add(GetRoleSign());
 		AllTask.Add(NewTask);
 		NewTask->AllTaskComponent.Add(this);
@@ -126,7 +127,7 @@ void UTS_TaskComponent::ServerAddTask_Implementation(UTS_Task* NewTask)
 	}
 }
 
-void UTS_TaskComponent::ServerAddTaskFromID_Implementation(int32 TaskID)
+void UTS_TaskComponent::ServerAddTaskFromID_Implementation(int32 TaskID, FTaskChainInfo TaskChainInfo/* = FTaskChainInfo()*/)
 {
 	UGameInstance* GameInstance = UGameplayStatics::GetGameInstance(this);
 	if (GameInstance)
@@ -134,12 +135,12 @@ void UTS_TaskComponent::ServerAddTaskFromID_Implementation(int32 TaskID)
 		UTS_GISubsystem* TS_GISubsystem = GameInstance->GetSubsystem<UTS_GISubsystem>();
 		if (TS_GISubsystem)
 		{
-			ServerAddTask(TS_GISubsystem->CreateTaskFromID(TaskID));
+			ServerAddTask(TS_GISubsystem->CreateTaskFromID(TaskID), TaskChainInfo);
 		}
 	}
 }
 
-void UTS_TaskComponent::ServerAddTaskFromInfo_Implementation(FTaskInfo TaskInfo)
+void UTS_TaskComponent::ServerAddTaskFromInfo_Implementation(FTaskInfo TaskInfo, FTaskChainInfo TaskChainInfo/* = FTaskChainInfo()*/)
 {
 	UGameInstance* GameInstance = UGameplayStatics::GetGameInstance(this);
 	if (GameInstance)
@@ -147,7 +148,7 @@ void UTS_TaskComponent::ServerAddTaskFromInfo_Implementation(FTaskInfo TaskInfo)
 		UTS_GISubsystem* TS_GISubsystem = GameInstance->GetSubsystem<UTS_GISubsystem>();
 		if (TS_GISubsystem)
 		{
-			ServerAddTask(TS_GISubsystem->CreateTaskFromInfo(TaskInfo));
+			ServerAddTask(TS_GISubsystem->CreateTaskFromInfo(TaskInfo), TaskChainInfo);
 		}
 	}
 }
@@ -217,6 +218,5 @@ void UTS_TaskComponent::NetMultiChangeTaskMarkStateFromTask_Implementation(UTS_T
 		Task->NetMultiChangeTaskMarkState(ShowOrHide);
 	}
 }
-
 
 
