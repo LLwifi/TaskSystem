@@ -96,12 +96,14 @@ void UTS_Task::ServerRefreshOneTaskTargetFromInfo(FRefreshTaskTargetInfo Refresh
 	if (!TaskTargetInfo.bTaskTargetIsEnd && (RefreshTaskTargetInfo.RefreshTaskTargetID == TaskTargetInfo.TaskTargetID ||//ID相同直接通过
 		(TaskTargetInfo.bCompareInfoIsOverride && SomeTaskTargetUpdateCheck(TaskTargetInfo, RefreshTaskTargetInfo))))//开启除了ID之外的其他检测方式 && 经过自定义的二次比对后可以增加进度
 	{
+		FTaskTargetInfo Temp = TaskTargetInfo;
 		//通过比对
 		if (TaskTargetInfo.AddProgress(RefreshTaskTargetInfo.AddProgress, RefreshTaskTargetInfo.RoleSign))//触发客户端的TaskUpdate同步函数
 		{
-			SomeTaskTargetEnd(TaskTargetInfo, true, RefreshTaskTargetInfo.RoleSign);
+			SomeTaskTargetEnd(Temp, true, RefreshTaskTargetInfo.RoleSign);
+			Temp = TaskTargetInfo;
 		}
-		TaskTargetUpdate(TaskTargetInfo);//服务器调用该函数
+		TaskTargetUpdate(Temp);//服务器调用该函数
 	}
 }
 
@@ -544,7 +546,7 @@ void UTS_Task::SomeTaskTargetTimeEnd()
 	TaskEndCheckOfParameter(CompleteTaskTargetNum, CompleteTaskTargetNum_MustDo, TaskTargetEndNum);
 }
 
-void UTS_Task::SomeTaskTargetEnd_Implementation(const FTaskTargetInfo& CompleteTaskTarget, bool IsComplete, FName RoleSign)
+void UTS_Task::SomeTaskTargetEnd_Implementation(FTaskTargetInfo CompleteTaskTarget, bool IsComplete, FName RoleSign)
 {
 	//某个任务目标完成了，尝试触发连锁
 	for (FTaskChainAddInfo ChainAddInfo : CompleteTaskTarget.ChainAddInfo)

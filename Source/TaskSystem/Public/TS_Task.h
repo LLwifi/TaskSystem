@@ -169,8 +169,8 @@ public:
 	* RoleSign：哪个角色导致的结束，如果是自然时间结束该值也为None
 	*/
 	UFUNCTION(BlueprintNativeEvent)
-		void SomeTaskTargetEnd(const FTaskTargetInfo& CompleteTaskTarget, bool IsComplete, FName RoleSign = "None");
-	virtual void SomeTaskTargetEnd_Implementation(const FTaskTargetInfo& CompleteTaskTarget, bool IsComplete, FName RoleSign = "None");
+		void SomeTaskTargetEnd(FTaskTargetInfo CompleteTaskTarget, bool IsComplete, FName RoleSign = "None");
+	virtual void SomeTaskTargetEnd_Implementation(FTaskTargetInfo CompleteTaskTarget, bool IsComplete, FName RoleSign = "None");
 
 	//某个任务目标更新的比对
 	UFUNCTION(BlueprintNativeEvent)
@@ -260,10 +260,10 @@ public:
 		TArray<FName> RoleSigns;
 
 	//任务时长
-	UPROPERTY()
+	UPROPERTY(BlueprintReadWrite)
 		FTimerHandle TaskTimeHandle;
 	//该任务每个任务目标的时长Handle<目标名称,时长Handle>
-	UPROPERTY()
+	UPROPERTY(BlueprintReadWrite)
 		TMap<FString, FTimerHandle> TaskTargetTimeHandle;
 
 	//任务标记显示状态
