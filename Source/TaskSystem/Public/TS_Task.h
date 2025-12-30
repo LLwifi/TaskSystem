@@ -44,6 +44,9 @@ public:
 
 	//通过信息刷新单个任务目标 该函数需要在服务器调用
 	UFUNCTION(BlueprintCallable)
+	void ServerRefreshOneTaskTargetFromID(FRefreshTaskTargetInfo RefreshTaskTargetInfo, int32 TaskTargetID);
+	//通过信息刷新单个任务目标 该函数需要在服务器调用
+	UFUNCTION(BlueprintCallable)
 	void ServerRefreshOneTaskTargetFromInfo(FRefreshTaskTargetInfo RefreshTaskTargetInfo, UPARAM(Ref)FTaskTargetInfo& TaskTargetInfo);
 	//通过信息刷新任务目标 该函数需要在服务器调用
 	UFUNCTION(BlueprintCallable)
@@ -177,9 +180,17 @@ public:
 		bool SomeTaskTargetUpdateCheck(FTaskTargetInfo CheckTaskTarget, FRefreshTaskTargetInfo RefreshTaskTargetInfo);
 	virtual bool SomeTaskTargetUpdateCheck_Implementation(FTaskTargetInfo CheckTaskTarget, FRefreshTaskTargetInfo RefreshTaskTargetInfo);
 
-	//获取任务参数
+	/*获取任务参数
+	* retuen：是否找到了ParameterName的参数
+	* ParameterName：要获取的参数名称——和配置一一对应
+	* Parameter：获取的参数结构，根据ParameterName寻找
+	* Index：决定Value的值是哪个下标
+	* Value：ParameterName参数中Index的参数
+	* 注意:找不到ParameterName才会返回false，如果找到了但index下标的值找不到只会影响Value的值
+	* 
+	*/
 	UFUNCTION(BlueprintPure)
-	bool GetTaskParameterValue(FName ParameterName,float& Value);
+	bool GetTaskParameterValue(FName ParameterName, int32 Index, float& Value, FTaskParameter& Parameter);
 
 	/*改变任务标记状态，外部调用（如在任务界面点击追踪/标记）
 	* ShowOrHide：该值为true时显示标记，该值为false时隐藏标记
@@ -219,6 +230,8 @@ public:
 	//通过ID获取该任务上的任务目标
 	//UFUNCTION(BlueprintPure)
 	bool GetTaskTargetFromID(int32 ID, FTaskTargetInfo*& TaskTargetInfo);
+
+
 public:
 	
 	UPROPERTY(BlueprintAssignable)
@@ -281,7 +294,7 @@ public:
 
 	//任务参数<参数名，参数>
 	UPROPERTY(BlueprintReadWrite)
-		TMap<FName,float> TaskParameter;
+		TMap<FName, FTaskParameter> TaskParameter;
 
 	/*当前导致TaskTargetUpdate触发的任务目标信息
 	*/

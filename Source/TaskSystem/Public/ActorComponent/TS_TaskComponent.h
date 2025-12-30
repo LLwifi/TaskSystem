@@ -20,6 +20,7 @@ enum class ETS_TaskRole :uint8
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FTaskComponentDelegate, UTS_TaskComponent*, AllTaskComponent,  UTS_Task*, Task);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FTaskUpdateDelegate, UTS_TaskComponent*, TaskComponent);
 
 /*任务组件
 * 处理任务
@@ -101,6 +102,8 @@ public:
 	FTaskComponentDelegate AddTaskEvent;
 	UPROPERTY(BlueprintAssignable)
 	FTaskComponentDelegate TaskEndEvent;
+	UPROPERTY(BlueprintAssignable)
+	FTaskUpdateDelegate AllTaskUpdateEvent;
 
 	//该Actor在任务流程中扮演什么样的角色
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)

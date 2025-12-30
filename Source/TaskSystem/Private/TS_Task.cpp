@@ -91,19 +91,32 @@ void UTS_Task::ReplicatedUsing_bTaskIsEndChange()
 	TaskEnd();
 }
 
+void UTS_Task::ServerRefreshOneTaskTargetFromID(FRefreshTaskTargetInfo RefreshTaskTargetInfo, int32 TaskTargetID)
+{
+	FTaskTargetInfo* TaskTarget = nullptr;
+	if (GetTaskTargetFromID(TaskTargetID, TaskTarget))
+	{
+		ServerRefreshOneTaskTargetFromInfo(RefreshTaskTargetInfo, *TaskTarget);
+	}
+}
+
 void UTS_Task::ServerRefreshOneTaskTargetFromInfo(FRefreshTaskTargetInfo RefreshTaskTargetInfo, UPARAM(Ref)FTaskTargetInfo& TaskTargetInfo)
 {
 	if (!TaskTargetInfo.bTaskTargetIsEnd && (RefreshTaskTargetInfo.RefreshTaskTargetID == TaskTargetInfo.TaskTargetID ||//ID相同直接通过
 		(TaskTargetInfo.bCompareInfoIsOverride && SomeTaskTargetUpdateCheck(TaskTargetInfo, RefreshTaskTargetInfo))))//开启除了ID之外的其他检测方式 && 经过自定义的二次比对后可以增加进度
 	{
-		FTaskTargetInfo Temp = TaskTargetInfo;
+		UE_LOG(LogTemp, Warning, TEXT("RefreshOneTaskTarget-1 --- [%d]%s[%d/%d]"), TaskTargetInfo.TaskTargetID, *TaskTargetInfo.TaskTargetText.ToString(), TaskTargetInfo.TaskTargetCurCount, TaskTargetInfo.TaskTargetMaxCount);
+		FTaskTargetInfo TempTaskTargetInfo = TaskTargetInfo;
 		//通过比对
 		if (TaskTargetInfo.AddProgress(RefreshTaskTargetInfo.AddProgress, RefreshTaskTargetInfo.RoleSign))//触发客户端的TaskUpdate同步函数
 		{
-			SomeTaskTargetEnd(Temp, true, RefreshTaskTargetInfo.RoleSign);
-			Temp = TaskTargetInfo;
+			TempTaskTargetInfo = TaskTargetInfo;
+			UE_LOG(LogTemp, Warning, TEXT("RefreshOneTaskTarget-2 --- [%d]%s[%d/%d]"), TaskTargetInfo.TaskTargetID, *TaskTargetInfo.TaskTargetText.ToString(), TaskTargetInfo.TaskTargetCurCount, TaskTargetInfo.TaskTargetMaxCount);
+			SomeTaskTargetEnd(TaskTargetInfo, true, RefreshTaskTargetInfo.RoleSign);
 		}
-		TaskTargetUpdate(Temp);//服务器调用该函数
+		UE_LOG(LogTemp, Warning, TEXT("RefreshOneTaskTarget-3 --- [%d]%s[%d/%d]"), TempTaskTargetInfo.TaskTargetID, *TempTaskTargetInfo.TaskTargetText.ToString(), TempTaskTargetInfo.TaskTargetCurCount, TempTaskTargetInfo.TaskTargetMaxCount);
+		TaskTargetUpdate(TempTaskTargetInfo);//服务器调用该函数
+		UE_LOG(LogTemp, Warning, TEXT("RefreshOneTaskTarget-4 --- [%d]%s[%d/%d]"), TempTaskTargetInfo.TaskTargetID, *TempTaskTargetInfo.TaskTargetText.ToString(), TempTaskTargetInfo.TaskTargetCurCount, TempTaskTargetInfo.TaskTargetMaxCount);
 	}
 }
 
@@ -119,6 +132,10 @@ void UTS_Task::ServerRefreshTaskTargetFromInfo(FRefreshTaskTargetInfo RefreshTas
 	int32 TaskTargetEndNum = 0;//结束的任务目标数量
 	for (int32 i = 0; i < AllTaskTargetInfo.Num(); i++)
 	{
+		//FTaskTargetInfo* TaskTarget = nullptr;
+		//if (GetTaskTargetFromID(AllTaskTargetInfo[i].TaskTargetID, TaskTarget))
+		//{
+		//}
 		ServerRefreshOneTaskTargetFromInfo(RefreshTaskTargetInfo, TaskInfo.TaskTargetInfo[i]);
 		if (TaskInfo.TaskTargetInfo[i].bTaskTargetIsEnd)//目标已经结束
 		{
@@ -220,29 +237,32 @@ FTaskTargetInfo UTS_Task::ModifyTaskTargetInfo_Implementation(FTaskTargetInfo Da
 
 void UTS_Task::StartTask_Implementation()
 {
-	if (UKismetSystemLibrary::IsServer(this))//该函数首次由UTS_TaskComponent在服务器调用
+	if (!bTaskIsStart)//避免重复调用开始
 	{
-		FTaskInfo TaskInfoTemp;
-		TryInitTaskInfoFromDataTable(TaskInfo, TaskInfoTemp);//查表初始化
-
-		//计时器只在服务器上开启
-		if (TaskInfo.TaskTime > 0.0f)
+		if (UKismetSystemLibrary::IsServer(this))//该函数首次由UTS_TaskComponent在服务器调用
 		{
-			GetWorld()->GetTimerManager().SetTimer(TaskTimeHandle, this, &UTS_Task::TaskEnd, TaskInfo.TaskTime);
+			FTaskInfo TaskInfoTemp;
+			TryInitTaskInfoFromDataTable(TaskInfo, TaskInfoTemp);//查表初始化
+
+			//计时器只在服务器上开启
+			if (TaskInfo.TaskTime > 0.0f)
+			{
+				GetWorld()->GetTimerManager().SetTimer(TaskTimeHandle, this, &UTS_Task::TaskEnd, TaskInfo.TaskTime);
+			}
+
+			TArray<FTaskTargetInfo> InitTaskTarget = TaskInfo.TaskTargetInfo;
+			TaskInfo.TaskTargetInfo.Empty();//清空，通过下面for循环处理完后再重新添加
+			for (FTaskTargetInfo& TaskTargetInfo : InitTaskTarget)
+			{
+				SetTaskTargetTimer(TaskTargetInfo);
+
+				ServerAddTaskTarget(TaskTargetInfo);
+			}
+
+			bTaskIsStart = true;//触发客户端的StartTask同步函数
 		}
-
-		TArray<FTaskTargetInfo> InitTaskTarget = TaskInfo.TaskTargetInfo;
-		TaskInfo.TaskTargetInfo.Empty();//清空，通过下面for循环处理完后再重新添加
-		for (FTaskTargetInfo& TaskTargetInfo : InitTaskTarget)
-		{
-			SetTaskTargetTimer(TaskTargetInfo);
-
-			ServerAddTaskTarget(TaskTargetInfo);
-		}
-
-		bTaskIsStart = true;//触发客户端的StartTask同步函数
+		TaskStartEvent.Broadcast(this);
 	}
-	TaskStartEvent.Broadcast(this);
 }
 
 void UTS_Task::TaskUpdate_Implementation()
@@ -318,7 +338,7 @@ void UTS_Task::ServerTaskEnd(bool IsComplete/* = true*/)
 				if (TSCom->GetTaskOfID(OneChainInfo.ChainTaskHandle.ID, ChainTask) && ChainTask)
 				{
 					//找到任务后判断是影响任务本身还是任务上的某个目标
-					FTaskTargetInfo* ChainTaskTargetInfo;
+					FTaskTargetInfo* ChainTaskTargetInfo = nullptr;
 					bool ChainIsComplete = bTaskIsComplete;//影响的结果
 					if (OneChainInfo.ChainTaskTargetHandle.ID == -1)//影响任务
 					{
@@ -625,6 +645,7 @@ void UTS_Task::SomeTaskTargetEnd_Implementation(FTaskTargetInfo CompleteTaskTarg
 			}
 		}
 	}
+	UE_LOG(LogTemp, Warning, TEXT("SomeTaskTargetEnd-LinkEnd"));
 
 	FTaskTargetInfo TaskTargetInfo = CompleteTaskTarget;
 	//目标在结束时是否要影响任务
@@ -657,6 +678,7 @@ void UTS_Task::SomeTaskTargetEnd_Implementation(FTaskTargetInfo CompleteTaskTarg
 
 		}
 	}
+	UE_LOG(LogTemp, Warning, TEXT("SomeTaskTargetEnd-FunctionEnd"));
 }
 
 bool UTS_Task::SomeTaskTargetUpdateCheck_Implementation(FTaskTargetInfo CheckTaskTarget, FRefreshTaskTargetInfo RefreshTaskTargetInfo)
@@ -665,16 +687,20 @@ bool UTS_Task::SomeTaskTargetUpdateCheck_Implementation(FTaskTargetInfo CheckTas
 	return CheckTaskTarget.BeCompareInfo.CompareResult(RefreshTaskTargetInfo.CompareInfo, FailText);
 }
 
-bool UTS_Task::GetTaskParameterValue(FName ParameterName, float& Value)
+bool UTS_Task::GetTaskParameterValue(FName ParameterName, int32 Index, float& Value, FTaskParameter& Parameter)
 {
 	if (TaskParameter.Contains(ParameterName))
 	{
-		Value = TaskParameter[ParameterName];
+		Parameter = TaskParameter[ParameterName];
+		if (TaskParameter[ParameterName].Parameters.IsValidIndex(Index))
+		{
+			Value = TaskParameter[ParameterName].Parameters[Index];
+		}
 		return true;
 	}
-	else if(TaskInfo.GetParameterValue(ParameterName, Value))
+	else if(TaskInfo.GetParameterValue(ParameterName, Index, Value, Parameter))
 	{
-		TaskParameter.Add(ParameterName, Value);
+		TaskParameter.Add(ParameterName, Parameter);
 		return true;
 	}
 	return false;

@@ -89,7 +89,7 @@ void UTS_TaskComponent::TickComponent(float DeltaTime, ELevelTick TickType, FAct
 
 void UTS_TaskComponent::ReplicatedUsing_AllTaskChange()
 {
-
+	AllTaskUpdateEvent.Broadcast(this);
 }
 
 FName UTS_TaskComponent::GetRoleSign()

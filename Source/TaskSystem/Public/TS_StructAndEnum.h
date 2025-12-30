@@ -149,10 +149,22 @@ struct FTaskParameter
 	GENERATED_BODY()
 public:
 	FTaskParameter() {}
-	FTaskParameter(FName _Name, int32 _Value)
+	FTaskParameter(FName _Name, float _Value)
 	{
 		Name = _Name;
-		Value = _Value;
+		if (Parameters.IsValidIndex(0))
+		{
+			Parameters[0] = _Value;
+		}
+		else
+		{
+			Parameters.Add(_Value);
+		}
+	}
+	FTaskParameter(FName _Name, TArray<float> _Parameters)
+	{
+		Name = _Name;
+		Parameters = _Parameters;
 	}
 public:
 	//参数名
@@ -161,7 +173,7 @@ public:
 
 	//参数值
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	float Value;
+	TArray<float> Parameters = {0.0f};
 };
 
 //任务目标结束任务类型
@@ -332,6 +344,10 @@ public:
 		{
 			TaskTargetText = TaskTargetInfo.TaskTargetText;
 		}
+		if (TaskTargetDescribe.IsEmpty())
+		{
+			TaskTargetDescribe = TaskTargetInfo.TaskTargetDescribe;
+		}
 		if (TaskTargetTag.Num() == 0)
 		{
 			TaskTargetTag = TaskTargetInfo.TaskTargetTag;
@@ -381,13 +397,17 @@ public:
 	}
 
 	//获取任务目标参数
-	bool GetParameterValue(FName ParameterName, float& Value)
+	bool GetParameterValue(FName ParameterName, int32 Index, float& Value, FTaskParameter& Parameter)
 	{
-		for (FTaskParameter& Parameter : TaskTargetParameter)
+		for (FTaskParameter& TaskParameter : TaskTargetParameter)
 		{
-			if (Parameter.Name == ParameterName)
+			if (TaskParameter.Name == ParameterName)
 			{
-				Value = Parameter.Value;
+				Parameter = TaskParameter;
+				if (TaskParameter.Parameters.IsValidIndex(Index))
+				{
+					Value = TaskParameter.Parameters[Index];
+				}
 				return true;
 			}
 		}
@@ -416,11 +436,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float TaskTargetTime = -1.0f;
 
-	/*任务目标的描述
+	/*任务目标的文本/标题
 	该值有效且bIsCustom为false时，可以覆盖表数据的参数
 	*/
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FText TaskTargetText;
+
+	/*任务目标的描述
+	该值有效且bIsCustom为false时，可以覆盖表数据的参数
+	*/
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FText TaskTargetDescribe;
 
 	//目标在时间结束时是否视为完成
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
@@ -459,11 +485,6 @@ public:
 	//任务目标的对照结构信息是否需要覆盖 同时在目标本身上表示着是否开启除了ID之外的其他检测方式
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bCompareInfoIsOverride = false;
-
-	////任务目标对照结构信息* 已经废弃，勿用
-	//UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditConditionHides, EditCondition = "bCompareInfoIsOverride"))
-	//FTaskCompareInfo TaskTargetCompareInfo;
-	
 
 	//被比对信息
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditConditionHides, EditCondition = "bCompareInfoIsOverride"))
@@ -558,20 +579,24 @@ public:
 	}
 
 	//获取任务参数
-	bool GetParameterValue(FName ParameterName, float& Value)
+	bool GetParameterValue(FName ParameterName, int32 Index, float& Value, FTaskParameter& Parameter)
 	{
-		for (FTaskParameter& Parameter : TaskOverrideParameter)
+		for (FTaskParameter& TaskParameter : TaskOverrideParameter)
 		{
-			if (Parameter.Name == ParameterName)
+			if (TaskParameter.Name == ParameterName)
 			{
-				Value = Parameter.Value;
+				Parameter = TaskParameter;
+				if (TaskParameter.Parameters.IsValidIndex(Index))
+				{
+					Value = TaskParameter.Parameters[Index];
+				}
 				return true;
 			}
 		}
 		//在任务目标里面寻找
 		for (FTaskTargetInfo& TaskTarget : TaskTargetInfo)
 		{
-			if (TaskTarget.GetParameterValue(ParameterName, Value))
+			if (TaskTarget.GetParameterValue(ParameterName, Index, Value, Parameter))
 			{
 				return true;
 			}
