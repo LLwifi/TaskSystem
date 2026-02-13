@@ -63,15 +63,19 @@ public:
 
 	//添加任务
 	UFUNCTION(BlueprintCallable, Server, Reliable)
-		void ServerAddTask(UTS_Task* NewTask, FTaskChainInfo TaskChainInfo = FTaskChainInfo());
+		void ServerAddTask(UTS_Task* NewTask);
 
 	//通过任务ID添加任务
 	UFUNCTION(BlueprintCallable, Server, Reliable)
-		void ServerAddTaskFromID(int32 TaskID, FTaskChainInfo TaskChainInfo = FTaskChainInfo());
+		void ServerAddTaskFromID(int32 TaskID);
 
 	//通过任务信息添加任务
 	UFUNCTION(BlueprintCallable, Server, Reliable)
-		void ServerAddTaskFromInfo(FTaskInfo TaskInfo, FTaskChainInfo TaskChainInfo = FTaskChainInfo());
+		void ServerAddTaskFromInfo(FTaskInfo TaskInfo);
+
+	//完成任务（任务ID 是否属于完成结束）
+	UFUNCTION(BlueprintCallable, Server, Reliable)
+		void ServerFinishTaskFromID(int32 TaskID, bool IsComplete);
 
 	//结束任务（任务ID 是否属于完成结束）
 	UFUNCTION(BlueprintCallable, Server, Reliable)
@@ -90,7 +94,13 @@ public:
 	//通过ID获取当前接取的任务
 	UFUNCTION(BlueprintPure)
 		bool GetTaskOfID(int32 TaskID, UTS_Task*& Task);
-		
+	
+	/*RPC到服务器 | 没有服务器权限的调用时机可以用该函数（如UI） | 通过任务改变标记状态 
+	* 因为任务本身（Object）不支持RPC函数，这里利用组件进行多播
+	*/
+	UFUNCTION(BlueprintCallable, Server, Reliable)
+	void ServerChangeTaskMarkStateFromTask(UTS_Task* Task, bool ShowOrHide);
+
 	/*多播 通过任务改变标记状态
 	* 因为任务本身（Object）不支持RPC函数，这里利用组件进行多播
 	*/

@@ -10,61 +10,6 @@
 
 class UTS_TaskCompare;
 
-/*任务的对比对照结构体
-* 该结构体将常见的比较情况进行了汇总
-* 已经废弃，勿用
-*/
-USTRUCT(BlueprintType)
-struct FTaskCompareInfo : public FTableRowBase
-{
-	GENERATED_BODY()
-public:
-	//比对方式是否使用任务比对类
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	bool IsUseTaskCompare = false;
-
-	//任务对照类
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditConditionHides, EditCondition = "IsUseTaskCompare"))
-	TSoftClassPtr<UTS_TaskCompare> TaskCompareClass;
-
-	/*TaskCompareTag_Info，与外部进行比对时的决策
-	* 该值为Flase时，外部满足任意一个Tag即可
-	*/
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditConditionHides, EditCondition = "!IsUseTaskCompare"))
-	bool TaskCompareTagIsAllMatch = true;
-
-	/*TaskCompareTag_Info，与外部进行比对时的精准决策
-	* 该值为Flase时，外部Tag包含父类即可
-	*/
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditConditionHides, EditCondition = "!IsUseTaskCompare"))
-	bool TaskCompareTagIsExactMatch = true;
-
-	/*任务对照Tag
-	* 可以作为类型使用，例如击杀/收集任务（任务目标类型对照） 等级/职业判断（任务条件类型对照）
-	*/
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (Categories = "Task"), meta = (EditConditionHides, EditCondition = "!IsUseTaskCompare"))
-	FGameplayTagContainer TaskCompareTag_Info;
-
-	/*任务对照Class 会判断是否等于该类或该类的子类
-	* 该值用来判断目标的类型，例如判断击杀/交互的单位
-	*/
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditConditionHides, EditCondition = "!IsUseTaskCompare"))
-	TSoftClassPtr<UObject> TaskCompareClass_Info;
-
-	/*任务对照自定义信息 自定义字符比对，任务目标检测时额外的比对项目
-	* 某些不至于使用UObject但是Class不足以判断内容时，可以选择使用该内容进行判断
-	* 例如：击杀的目标是否携带某种状态也可以通过定于该值进行判断：例如用Fire代表燃烧；Ice代表冰冻（任务目标类型对照）
-	*/
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditConditionHides, EditCondition = "!IsUseTaskCompare"))
-	FString TaskCompareString_Info;
-
-	/*任务对照Obejct信息
-	* 该值用来判断一些更加细致的具体事项（例如复数信息），例如击杀的目标是否携带某种状态，交互的单位身价是否超过某个数值
-	*/
-	UPROPERTY(BlueprintReadWrite)
-	UObject* TaskCompareObject_Info;
-};
-
 /*任务的前置条件，是否可以接取该任务
 */
 USTRUCT(BlueprintType)
@@ -182,7 +127,8 @@ enum class ETS_TaskChainTriggerType :uint8
 {
 	Complete = 0 UMETA(DisplayName = "完成时触发"),
 	Fail UMETA(DisplayName = "失败时触发"),
-	End UMETA(DisplayName = "结束时触发")
+	End UMETA(DisplayName = "结束时触发"),
+	Active UMETA(DisplayName = "主动触发")
 };
 
 //任务相关类型
@@ -213,9 +159,9 @@ public:
 	int32 ID = -1;
 };
 
-//连锁结束类型
+//链接结束类型
 UENUM(BlueprintType)
-enum class ETS_ChainEndType :uint8
+enum class ETS_LinkEndType :uint8
 {
 	Follow = 0 UMETA(DisplayName = "跟随-目标完成/失败 则任务完成/失败"),
 	Reverse UMETA(DisplayName = "反转-目标完成/失败 则任务失败/完成"),
@@ -223,64 +169,67 @@ enum class ETS_ChainEndType :uint8
 	AlwaysFail UMETA(DisplayName = "结束即失败")
 };
 
-/*任务一次连锁信息
+/*任务一个链接信息
 * 在任务结束时通过该信息影响其他任务/任务目标
 */
 USTRUCT(BlueprintType)
-struct FTaskOnceChainInfo
+struct FTaskOneLinkInfo
 {
 	GENERATED_BODY()
 public:
 	int32 GetTaskID(){ return ChainTaskHandle.ID; }
 	int32 GetTaskTargetID() { return ChainTaskTargetHandle.ID; }
 public:
+	/*影响源（可以是任务或任务目标）
+	*/
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FTS_TaskRelatedHandle LinkSourceHandle = FTS_TaskRelatedHandle(ETS_TaskRelatedType::Task);
 
-	//是否自动获取连锁的任务ID 通常自动获取的是触发该连锁的那个任务ID
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (PinHiddenByDefault, InlineEditConditionToggle))
-	bool AutoGetChainTaskID = true;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditCondition = "!AutoGetChainTaskID"))
+	/*是否链接全部同ID的任务
+	* 该值为false时拿去最新该ID的任务
+	*/
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bIsLinkAllSameIDTask = false;
+	//任务信息 该配置的ETS_TaskRelatedType 只能为task
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FTS_TaskRelatedHandle ChainTaskHandle = FTS_TaskRelatedHandle(ETS_TaskRelatedType::Task);
 
-	//是否自动获取连锁的任务目标ID 通常自动获取的是触发该连锁的那个任务目标ID
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (PinHiddenByDefault, InlineEditConditionToggle))
-	bool AutoGetChainTaskTargetID = true;
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditCondition = "!AutoGetChainTaskTargetID"))
+	/*是否链接全部同ID的任务目标
+	* 该值为false时只会获取所在任务的目标
+	*/
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bIsLinkAllTaskTarget = false;
+	//任务目标信息 该配置的ETS_TaskRelatedType 只能为TaskTarget
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FTS_TaskRelatedHandle ChainTaskTargetHandle = FTS_TaskRelatedHandle(ETS_TaskRelatedType::TaskTarget);
 
-	//我如何影响连锁的内容
+	//以上配置如何被影响
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	ETS_ChainEndType ChainEndType = ETS_ChainEndType::Follow;
+	ETS_LinkEndType LinkEndType = ETS_LinkEndType::Follow;
 };
 
-/*任务连锁信息
+/*任务链接信息
 * 在任务结束时通过该信息影响其他任务/任务目标
 */
 USTRUCT(BlueprintType)
-struct FTaskChainInfo
+struct FTaskLinkInfo
 {
 	GENERATED_BODY()
 public:
-	int32 Num(){ return AllTaskChainInfo.Num(); }
-
-	void AutoSetID(int32 TaskID, int32 TaskTargetID)
+	void AppendLinkInfo(FTaskLinkInfo AppendInfo)
 	{
-		for (FTaskOnceChainInfo& Info : AllTaskChainInfo)
-		{
-			if (Info.AutoGetChainTaskID)
-			{
-				Info.ChainTaskHandle.ID = TaskID;
-			}
-			if (Info.AutoGetChainTaskTargetID)
-			{
-				Info.ChainTaskTargetHandle.ID = TaskTargetID;
-			}
-		}
+		LinkTo.Append(AppendInfo.LinkTo);
+		BeLink.Append(AppendInfo.BeLink);
 	}
 
 public:
-
+	//我影响别人
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	TArray<FTaskOnceChainInfo> AllTaskChainInfo;
+	TArray<FTaskOneLinkInfo> LinkTo;
+
+	//我被别人影响 / 别人影响我
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TArray<FTaskOneLinkInfo> BeLink;
 };
 
 /*任务连锁添加信息
@@ -295,9 +244,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	ETS_TaskChainTriggerType TaskChainTriggerType = ETS_TaskChainTriggerType::Complete;
 
-	//要添加的任务相关
+	/*要添加的任务相关 要新增一个任务还是任务目标
+	* 如果LinkInfo中的影响源（LinkSourceHandle）未配置，那么该handle会赋予给LinkInfo中的影响源
+	*/
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FTS_TaskRelatedHandle AddTaskRelatedHandle;
+
+	//任务相关的连锁信息
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FTaskLinkInfo LinkInfo;
 
 	/*添加任务的决策，该值需要AddTaskRelatedHandle.Type == ETS_TaskRelatedType::Task 时才有效
 	* 该值为true时：只给触发导致任务目标结束的那个角色添加
@@ -305,12 +260,6 @@ public:
 	*/
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bAddTaskToTriggerRole = true;
-
-	/*连锁的任务/任务目标 信息
-	* 注意：该值只有当AddTaskRelatedHandle 的 Type = Task 时才有效
-	*/
-	UPROPERTY(EditAnywhere, BlueprintReadWrite)
-	FTaskChainInfo AllChainInfo;
 };
 
 /*任务目标
@@ -448,7 +397,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	FText TaskTargetDescribe;
 
-	//目标在时间结束时是否视为完成
+	//任务目标在（倒计时）时间结束时是否视为完成
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool bTimeEndComplete = false;
 
@@ -457,7 +406,7 @@ public:
 	bool bTaskTargetEndTask = false;
 	//任务目标结束任务的类型
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditCondition = "bTaskTargetEndTask"))
-	ETS_ChainEndType TaskTargetEndTaskType = ETS_ChainEndType::Follow;
+	ETS_LinkEndType TaskTargetEndTaskType = ETS_LinkEndType::Follow;
 
 	/*任务目标Tag  目标类型(是否是必做任务);目标所在地
 	* 该值有效且bIsCustom为false时，可以覆盖表数据的参数
@@ -490,11 +439,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditConditionHides, EditCondition = "bCompareInfoIsOverride"))
 	FCC_BeCompareInfo BeCompareInfo;
 
-	/*连锁目标信息 当该任务目标完成时，会自动触发尝试添加的任务/任务目标ID
+	/*添加连锁目标信息 当该任务目标完成时，会自动触发尝试添加的任务/任务目标ID
 	* 该值有效且bIsCustom为false时，可以覆盖表数据的参数
 	*/
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TArray<FTaskChainAddInfo> ChainAddInfo;
+	/*待激活的添加连锁目标信息 当该任务目标完成时，【不会】自动触发尝试添加的任务/任务目标ID
+	* 该值有效且bIsCustom为false时，可以覆盖表数据的参数
+	* 该值仅做为一个配置项存在，可以在任务上调用TriggerTaskChainInfo_Array进行主动添加
+	*/
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TArray<FTaskChainAddInfo> BeActiveChainAddInfo;
+
+	//任务目标的链接信息
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FTaskLinkInfo TaskTargetLinkInfo;
 
 	/*任务相关参数
 	* 任务目标和任务均配置了同名参数时，优先获取TaskOverrideParameter
@@ -643,12 +602,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TArray<FTaskTargetInfo> TaskTargetInfo;
 
-	/*完成任务所需完成的任务目标数量——该项适用于该任务没有必做目标的情况
-	* 当TaskTargetInfo中一个必做任务目标都没有的时候启动该值进行判断完成的非必做目标数量
-	* 当完成非必做目标数量 >= TaskCompleteTargetNum 时，任务也视为完成
-	*/
+	//完成任务所需完成的任务目标数量
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	int32 TaskCompleteTargetNum = 1;
+	//完成任务所需完成的必做任务目标数量
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	int32 TaskCompleteMustDoTargetNum = 1;
+
+	//任务的链接信息
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FTaskLinkInfo TaskLinkInfo;
 
 	/*奖励<奖励ID，具体奖励内容>
 	* 如果Key（奖励ID）为负数，使用Value（奖励信息）的内容作为奖励

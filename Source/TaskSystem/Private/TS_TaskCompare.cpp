@@ -3,7 +3,7 @@
 
 #include "TS_TaskCompare.h"
 
-bool UTS_TaskCompare::CompareResult_Implementation(FTaskCompareInfo ThisCompareInfo, FRefreshTaskTargetInfo RefreshTaskTargetInfo)
-{
-	return true;
-}
+//bool UTS_TaskCompare::CompareResult_Implementation(FTaskCompareInfo ThisCompareInfo, FRefreshTaskTargetInfo RefreshTaskTargetInfo)
+//{
+//	return true;
+//}

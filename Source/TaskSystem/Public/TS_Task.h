@@ -9,6 +9,7 @@
 #include "TS_Task.generated.h"
 
 class UTS_TaskComponent;
+class UTS_GISubsystem;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FTaskDelegate, UTS_Task*, Task);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FTaskMarkInfoDelegate, const TArray<AActor*>&, TaskMarkActors, const TArray<FVector>&, TaskMarkLocation);//任务标记信息更新
@@ -16,6 +17,12 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FTaskMarkInfoDelegate, const TArray
 /**
  * 任务类
  * 任务类的Outer为UTS_TaskComponent才能网络同步
+ * 生命周期
+ * InitTask
+ * StartTask
+ * TaskTargetUpdate（NetMultiAddNewTaskTarget/NetMultiTaskTargetEnd） - 》TaskUpdate
+ * TaskFinish
+ * TaskEnd
  */
 UCLASS(Blueprintable, BlueprintType)
 class TASKSYSTEM_API UTS_Task : public UObject
@@ -37,7 +44,13 @@ public:
 	void ReplicatedUsing_CurUpdateTaskTarget();
 
 	UFUNCTION()
+	void ReplicatedUsing_bTaskIsInitChange();
+	
+	UFUNCTION()
 	void ReplicatedUsing_bTaskIsStartChange();
+
+	UFUNCTION()
+	void ReplicatedUsing_bTaskIsFinishChange();
 
 	UFUNCTION()
 	void ReplicatedUsing_bTaskIsEndChange();
@@ -84,7 +97,14 @@ public:
 	FTaskTargetInfo ModifyTaskTargetInfo(FTaskTargetInfo DataTaskTarget);
 	virtual FTaskTargetInfo ModifyTaskTargetInfo_Implementation(FTaskTargetInfo DataTaskTarget);
 
-	/*开始任务
+	/*初始化任务，该函数会在任务被创建后由UTS_GISubsystem调用
+	* 服务器客户端均会调用
+	*/
+	UFUNCTION(BlueprintNativeEvent)
+	void InitTask();
+	virtual void InitTask_Implementation();
+
+	/*开始任务_开始做/进行任务，当有角色获取/添加该任务时会调用
 	* 服务器客户端均会调用
 	*/
 	UFUNCTION(BlueprintNativeEvent)
@@ -115,6 +135,23 @@ public:
 	UFUNCTION(BlueprintNativeEvent)
 	void NetMultiTaskTargetEnd(FTaskTargetInfo EndTaskTargetInfo, bool TaskTargetIsComplete);
 	virtual void NetMultiTaskTargetEnd_Implementation(FTaskTargetInfo EndTaskTargetInfo, bool TaskTargetIsComplete);
+
+	/*任务完成 在任务判断自己应该结束时会调用该函数（目标全部完成 / 任务时间到了） 服务器客户端均会调用
+	* 在C++中该函数默认调用TaskEnd() 表示完整即结束
+	* 子类可以实现额外的需求，例如任务完成后还需要等待对话播放完成才会真正的结束
+	*/
+	UFUNCTION(BlueprintNativeEvent)
+	void TaskFinish();
+	virtual void TaskFinish_Implementation();
+
+	//主动使该任务完成 该函数需要在服务器调用 IsComplete：是否是完成结束该任务
+	UFUNCTION(BlueprintCallable)
+	void ServerTaskFinish(bool IsComplete = true);
+
+	//任务完成到结束的调用，子类可以复现改函数进行流程阶段
+	UFUNCTION(BlueprintNativeEvent)
+	void TaskFinishToEnd(bool IsComplete = true);
+	virtual void TaskFinishToEnd_Implementation(bool IsComplete = true);
 
 	/*任务结束 目标全部完成 / 任务时间到了
 	* 服务器客户端均会调用
@@ -164,7 +201,7 @@ public:
 	UFUNCTION()
 		void SomeTaskTargetTimeEnd();
 
-	/*某个任务目标结束 该函数只在服务器调用
+	/*某个任务目标结束的通知函数 该函数只在服务器调用
 	* 调用情况1：时间自然结束了
 	* 调用情况2：某个人的某个操作导致目标结束（完成/失败）
 	* CompleteTaskTarget：结束的任务目标信息
@@ -231,13 +268,35 @@ public:
 	//UFUNCTION(BlueprintPure)
 	bool GetTaskTargetFromID(int32 ID, FTaskTargetInfo*& TaskTargetInfo);
 
+	/*触发任务的连锁信息
+	* 主动调用时请保证TriggerType = ETS_TaskChainTriggerType::Active
+	* 如果是调用配置项，需要保证DT表配置中的Type = ETS_TaskChainTriggerType::Active 否则可能检测不通过
+	*/
+	UFUNCTION(BlueprintCallable)
+	void TriggerTaskChainAddInfo(FTaskChainAddInfo TaskChainAddInfo, ETS_TaskChainTriggerType TriggerType, FName RoleSign);
 
+	//触发任务的连锁信息——数组版本
+	UFUNCTION(BlueprintCallable)
+	void TriggerTaskChainAddInfo_Array(TArray<FTaskChainAddInfo> TaskChainAddInfo, ETS_TaskChainTriggerType TriggerType, FName RoleSign);
+
+	UFUNCTION(BlueprintPure)
+	UTS_GISubsystem* GetTS_GISubsystem();
+
+	//触发任务的链接信息
+	UFUNCTION(BlueprintCallable)
+	void LinkTo(TArray<FTaskOneLinkInfo> LinkToInfo, bool IsComplete);
+
+	//通过任务目标ID获取最后刷新的角色签名
+	UFUNCTION(BlueprintCallable)
+	FName GetLastRoleSignFromTaskTargetID(int32 TaskTargetID);
 public:
 	
 	UPROPERTY(BlueprintAssignable)
 		FTaskDelegate TaskStartEvent;
 	UPROPERTY(BlueprintAssignable)
 		FTaskDelegate TaskUpdateEvent;
+	UPROPERTY(BlueprintAssignable)
+		FTaskDelegate TaskFinishEvent;
 	UPROPERTY(BlueprintAssignable)
 		FTaskDelegate TaskEndEvent;
 
@@ -251,15 +310,18 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TArray<FTaskTargetInfo> LastAllTaskTargetInfo;
 
-	//任务拥有必做目标的数量
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated)
-		int32 TaskMustDoTargetNum = 0;
 	//任务是否完成
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated)
 		bool bTaskIsComplete = false;
+	//任务是否初始化
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, ReplicatedUsing = ReplicatedUsing_bTaskIsInitChange)
+		bool bTaskIsInit = false;
 	//任务是否开始
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, ReplicatedUsing = ReplicatedUsing_bTaskIsStartChange)
 		bool bTaskIsStart = false;
+	//任务是否完成
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, ReplicatedUsing = ReplicatedUsing_bTaskIsFinishChange)
+		bool bTaskIsFinish = false;
 	//任务是否结束
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, ReplicatedUsing = ReplicatedUsing_bTaskIsEndChange)
 		bool bTaskIsEnd = false;
@@ -298,10 +360,13 @@ public:
 
 	/*当前导致TaskTargetUpdate触发的任务目标信息
 	*/
-	UPROPERTY(BlueprintReadWrite, Replicated, ReplicatedUsing = ReplicatedUsing_CurUpdateTaskTarget)
+	UPROPERTY(BlueprintReadWrite, ReplicatedUsing = ReplicatedUsing_CurUpdateTaskTarget)
 	TArray<FTaskTargetInfo> CurUpdateTaskTarget;
 
-	//任务的连锁信息
-	UPROPERTY(BlueprintReadWrite, Replicated)
-	FTaskChainInfo TaskChainInfo;
+	UPROPERTY(BlueprintReadWrite)
+	UTS_GISubsystem* TS_GISubsystem;
+	
+	//任务目标签名记录<任务目标ID,最后触发进度的签名> 该值仅在服务器有效
+	UPROPERTY(BlueprintReadWrite)
+	TMap<int32, FName> TaskTargetRoleSign;
 };

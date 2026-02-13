@@ -114,11 +114,11 @@ void UTS_TaskComponent::SetTaskRole(ETS_TaskRole RoleType)
 	}
 }
 
-void UTS_TaskComponent::ServerAddTask_Implementation(UTS_Task* NewTask, FTaskChainInfo TaskChainInfo/* = FTaskChainInfo()*/)
+void UTS_TaskComponent::ServerAddTask_Implementation(UTS_Task* NewTask)
 {
 	if (NewTask)
 	{
-		NewTask->TaskChainInfo = TaskChainInfo;
+		//NewTask->TaskLinkInfo = TaskLinkInfo;
 		NewTask->RoleSigns.Add(GetRoleSign());
 		AllTask.Add(NewTask);
 		NewTask->AllTaskComponent.Add(this);
@@ -127,7 +127,7 @@ void UTS_TaskComponent::ServerAddTask_Implementation(UTS_Task* NewTask, FTaskCha
 	}
 }
 
-void UTS_TaskComponent::ServerAddTaskFromID_Implementation(int32 TaskID, FTaskChainInfo TaskChainInfo/* = FTaskChainInfo()*/)
+void UTS_TaskComponent::ServerAddTaskFromID_Implementation(int32 TaskID)
 {
 	UGameInstance* GameInstance = UGameplayStatics::GetGameInstance(this);
 	if (GameInstance)
@@ -135,12 +135,12 @@ void UTS_TaskComponent::ServerAddTaskFromID_Implementation(int32 TaskID, FTaskCh
 		UTS_GISubsystem* TS_GISubsystem = GameInstance->GetSubsystem<UTS_GISubsystem>();
 		if (TS_GISubsystem)
 		{
-			ServerAddTask(TS_GISubsystem->CreateTaskFromID(TaskID), TaskChainInfo);
+			ServerAddTask(TS_GISubsystem->CreateTaskFromID(TaskID));
 		}
 	}
 }
 
-void UTS_TaskComponent::ServerAddTaskFromInfo_Implementation(FTaskInfo TaskInfo, FTaskChainInfo TaskChainInfo/* = FTaskChainInfo()*/)
+void UTS_TaskComponent::ServerAddTaskFromInfo_Implementation(FTaskInfo TaskInfo)
 {
 	UGameInstance* GameInstance = UGameplayStatics::GetGameInstance(this);
 	if (GameInstance)
@@ -148,8 +148,17 @@ void UTS_TaskComponent::ServerAddTaskFromInfo_Implementation(FTaskInfo TaskInfo,
 		UTS_GISubsystem* TS_GISubsystem = GameInstance->GetSubsystem<UTS_GISubsystem>();
 		if (TS_GISubsystem)
 		{
-			ServerAddTask(TS_GISubsystem->CreateTaskFromInfo(TaskInfo), TaskChainInfo);
+			ServerAddTask(TS_GISubsystem->CreateTaskFromInfo(TaskInfo));
 		}
+	}
+}
+
+void UTS_TaskComponent::ServerFinishTaskFromID_Implementation(int32 TaskID, bool IsComplete)
+{
+	UTS_Task* Task;
+	if (GetTaskOfID(TaskID, Task))
+	{
+		Task->ServerTaskFinish(IsComplete);
 	}
 }
 
@@ -209,6 +218,14 @@ bool UTS_TaskComponent::GetTaskOfID(int32 TaskID, UTS_Task*& Task)
 		}
 	}
 	return false;
+}
+
+void UTS_TaskComponent::ServerChangeTaskMarkStateFromTask_Implementation(UTS_Task* Task, bool ShowOrHide)
+{
+	if (Task)
+	{
+		NetMultiChangeTaskMarkStateFromTask(Task, ShowOrHide);
+	}
 }
 
 void UTS_TaskComponent::NetMultiChangeTaskMarkStateFromTask_Implementation(UTS_Task* Task, bool ShowOrHide)

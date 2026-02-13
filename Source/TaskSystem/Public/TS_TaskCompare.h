@@ -17,9 +17,9 @@ class TASKSYSTEM_API UTS_TaskCompare : public UObject
 {
 	GENERATED_BODY()
 	
-public:
-	//比较结果
-	UFUNCTION(BlueprintNativeEvent)
-		bool CompareResult(FTaskCompareInfo ThisCompareInfo, FRefreshTaskTargetInfo RefreshTaskTargetInfo);
-	virtual bool CompareResult_Implementation(FTaskCompareInfo ThisCompareInfo, FRefreshTaskTargetInfo RefreshTaskTargetInfo);
+//public:
+//	//比较结果
+//	UFUNCTION(BlueprintNativeEvent)
+//		bool CompareResult(FTaskCompareInfo ThisCompareInfo, FRefreshTaskTargetInfo RefreshTaskTargetInfo);
+//	virtual bool CompareResult_Implementation(FTaskCompareInfo ThisCompareInfo, FRefreshTaskTargetInfo RefreshTaskTargetInfo);
 };

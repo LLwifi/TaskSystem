@@ -16,16 +16,29 @@ UTS_Task* UTS_GISubsystem::CreateTaskFromInfo(FTaskInfo TaskInfo)
 			Task->TaskInfo = TaskInfo;
 			//生成唯一ID 任务ID长度 + 任务ID + 第几个同类任务
 			FString UniqueIDStr = FString::FromInt(FString::FromInt(TaskInfo.TaskID).Len()) + FString::FromInt(TaskInfo.TaskID);
-			if (UniqueID.Contains(TaskInfo.TaskID))
+			if (AllUniqueID.Contains(TaskInfo.TaskID))
 			{
-				UniqueID[TaskInfo.TaskID]++;
+				AllUniqueID[TaskInfo.TaskID]++;
 			}
 			else
 			{
-				UniqueID.Add(TaskInfo.TaskID,1);
+				AllUniqueID.Add(TaskInfo.TaskID,1);
 			}
-			UniqueIDStr += FString::FromInt(UniqueID[TaskInfo.TaskID]);
+			UniqueIDStr += FString::FromInt(AllUniqueID[TaskInfo.TaskID]);
 			Task->TaskUniqueID = FCString::Atoi(*UniqueIDStr);
+			Task->InitTask();
+
+			//记录
+			AllTask_UniqueID.Add(Task->TaskUniqueID, Task);
+			if (AllTask_ID.Contains(TaskInfo.TaskID))
+			{
+				AllTask_ID[TaskInfo.TaskID].Add(Task);
+			}
+			else
+			{
+				AllTask_ID.Add(TaskInfo.TaskID, FSameIDTask(Task));
+			}
+			
 			return Task;
 		}
 	}
@@ -44,4 +57,22 @@ UTS_Task* UTS_GISubsystem::CreateTaskFromID(int32 TaskID)
 		}
 	}
 	return nullptr;
+}
+
+UTS_Task* UTS_GISubsystem::GetTaskFromUniqueID(int32 UniqueID)
+{
+	if (AllTask_UniqueID.Contains(UniqueID))
+	{
+		return AllTask_UniqueID[UniqueID];
+	}
+	return nullptr;
+}
+
+FSameIDTask UTS_GISubsystem::GetTaskFromID(int32 ID)
+{
+	if (AllTask_ID.Contains(ID))
+	{
+		return AllTask_ID[ID];
+	}
+	return FSameIDTask();
 }
