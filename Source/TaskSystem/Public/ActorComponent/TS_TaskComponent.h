@@ -69,6 +69,10 @@ public:
 	UFUNCTION(BlueprintCallable, Server, Reliable)
 		void ServerAddTaskFromID(int32 TaskID);
 
+	//给该任务ID的任务添加任务目标ID
+	UFUNCTION(BlueprintCallable, Server, Reliable)
+		void ServerAddTaskTargetFromID(int32 TaskID, int32 TaskTargetID);
+
 	//通过任务信息添加任务
 	UFUNCTION(BlueprintCallable, Server, Reliable)
 		void ServerAddTaskFromInfo(FTaskInfo TaskInfo);

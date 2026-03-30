@@ -114,6 +114,15 @@ void UTS_TaskComponent::SetTaskRole(ETS_TaskRole RoleType)
 	}
 }
 
+void UTS_TaskComponent::ServerAddTaskTargetFromID_Implementation(int32 TaskID, int32 TaskTargetID)
+{
+	UTS_Task* Task;
+	if (GetTaskOfID(TaskID, Task) && Task)
+	{
+		Task->ServerAddTaskTargetOfID(TaskTargetID);
+	}
+}
+
 void UTS_TaskComponent::ServerAddTask_Implementation(UTS_Task* NewTask)
 {
 	if (NewTask)

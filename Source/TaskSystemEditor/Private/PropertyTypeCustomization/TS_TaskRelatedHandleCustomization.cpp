@@ -168,6 +168,8 @@ void ITS_TaskRelatedHandleCustomization::OnSelectionChanged_RowName(TSharedPtr<F
     RowNameHandle->SetValue(FName(*InItem.Get()));
     ComboBox_Name_Text->SetText(FText::FromString(*InItem));
 
+    TypeHandle->NotifyPreChange();
+
     switch (TaskRelatedHandle->Type)
     {
     case ETS_TaskRelatedType::TaskTarget:
@@ -189,6 +191,8 @@ void ITS_TaskRelatedHandleCustomization::OnSelectionChanged_RowName(TSharedPtr<F
     default:
         break;
     }
+
+    TypeHandle->NotifyPostChange(EPropertyChangeType::ValueSet);
 }
 
 TSharedRef<SWidget> ITS_TaskRelatedHandleCustomization::OnGenerateWidget_RowName(TSharedPtr<FString> InItem)
