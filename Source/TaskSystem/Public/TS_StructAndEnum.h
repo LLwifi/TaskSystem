@@ -586,6 +586,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	float TaskTime = -1.0f;
 
+	//任务在（倒计时）时间结束时是否视为完成
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bTimeEndIsComplete = false;
+
 	//该任务是否有前置条件
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	bool TaskIsHaveCondition = false;

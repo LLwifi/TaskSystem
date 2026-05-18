@@ -110,6 +110,10 @@ public:
 	*/
 	UFUNCTION(BlueprintCallable, NetMulticast, Reliable)
 	void NetMultiChangeTaskMarkStateFromTask(UTS_Task* Task, bool ShowOrHide);
+
+	//重设任务计时 该函数需要在服务器调用
+	UFUNCTION(BlueprintCallable, Server, Reliable)
+	void ServerReSetTaskTimeFromTask(UTS_Task* Task, float Time);
 public:
 
 	UPROPERTY(BlueprintAssignable)
@@ -134,4 +138,5 @@ public:
 	//与“我”相关的任务目标刷新信息
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 		TArray<FRefreshTaskTargetInfo> RefreshTaskTargetInfos;
+
 };

@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+ï»¿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "ActorComponent/TS_TaskComponent.h"
@@ -31,7 +31,7 @@ void UTS_TaskComponent::PostEditChangeProperty(FPropertyChangedEvent& PropertyCh
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
 
-	auto Property = PropertyChangedEvent.Property;//ÄÃµ½¸Ä±äµÄÊôĞÔ
+	auto Property = PropertyChangedEvent.Property;//æ‹¿åˆ°æ”¹å˜çš„å±æ€§
 	if (Property->GetFName() == GET_MEMBER_NAME_CHECKED(UTS_TaskComponent, TaskRole))
 	{
 		if (TaskRole == ETS_TaskRole::Player)
@@ -65,7 +65,7 @@ void UTS_TaskComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 bool UTS_TaskComponent::ReplicateSubobjects(class UActorChannel* Channel, FOutBunch* Bunch, FReplicationFlags* RepFlags)
 {
 	bool bWrote = Super::ReplicateSubobjects(Channel, Bunch, RepFlags);
-	//ÊÖ¶¯Í¬²½ÈÎÎñÀà
+	//æ‰‹åŠ¨åŒæ­¥ä»»åŠ¡ç±»
 	for (UTS_Task*& Task : AllTask)
 	{
 		if (!IsValid(Task))
@@ -131,7 +131,7 @@ void UTS_TaskComponent::ServerAddTask_Implementation(UTS_Task* NewTask)
 		NewTask->RoleSigns.Add(GetRoleSign());
 		AllTask.Add(NewTask);
 		NewTask->AllTaskComponent.Add(this);
-		NewTask->StartTask();//·şÎñÆ÷µ÷ÓÃ¸Ãº¯Êı
+		NewTask->StartTask();//æœåŠ¡å™¨è°ƒç”¨è¯¥å‡½æ•°
 		AddTaskEvent.Broadcast(this, NewTask);
 	}
 }
@@ -183,9 +183,9 @@ void UTS_TaskComponent::ServerEndTaskFromID_Implementation(int32 TaskID, bool Is
 void UTS_TaskComponent::ServerRefreshTaskTargetFromInfo_Implementation(FRefreshTaskTargetInfo RefreshTaskTargetInfo)
 {
 	TArray<UTS_Task*> TaskArray = AllTask;
-	for (UTS_Task*& OneTask : TaskArray)//Ã¿¸öÈÎÎñ
+	for (UTS_Task*& OneTask : TaskArray)//æ¯ä¸ªä»»åŠ¡
 	{
-		if (!OneTask->bTaskIsComplete || !OneTask->bTaskIsEnd)//Ã»ÓĞÍê³É¡¢Ã»ÓĞ½áÊøµÄÈÎÎñ²Å»á½øĞĞ¼ì²â
+		if (!OneTask->bTaskIsComplete || !OneTask->bTaskIsEnd)//æ²¡æœ‰å®Œæˆã€æ²¡æœ‰ç»“æŸçš„ä»»åŠ¡æ‰ä¼šè¿›è¡Œæ£€æµ‹
 		{
 			OneTask->ServerRefreshTaskTargetFromInfo(RefreshTaskTargetInfo);
 			if (OneTask->bTaskIsEnd)
@@ -220,7 +220,7 @@ bool UTS_TaskComponent::GetTaskOfID(int32 TaskID, UTS_Task*& Task)
 {
 	for (UTS_Task*& task : AllTask)
 	{
-		if (task->TaskInfo.TaskID == TaskID)
+		if (task && task->TaskInfo.TaskID == TaskID)
 		{
 			Task = task;
 			return true;
@@ -241,8 +241,20 @@ void UTS_TaskComponent::NetMultiChangeTaskMarkStateFromTask_Implementation(UTS_T
 {
 	if (Task)
 	{
+		bool IsUpdate = Task->bIsMarkTask != ShowOrHide;
 		Task->NetMultiChangeTaskMarkState(ShowOrHide);
+		if (IsUpdate)
+		{
+			Task->TaskUpdate();
+		}
 	}
 }
 
+void UTS_TaskComponent::ServerReSetTaskTimeFromTask_Implementation(UTS_Task* Task, float Time)
+{
+	if (Task)
+	{
+		Task->ServerReSetTaskTime(Time);
+	}
+}
 

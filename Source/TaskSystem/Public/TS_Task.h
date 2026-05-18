@@ -41,6 +41,9 @@ public:
 	void ReplicatedUsing_TaskInfoChange();
 
 	UFUNCTION()
+	void ReplicatedUsing_TaskTime();
+
+	UFUNCTION()
 	void ReplicatedUsing_CurUpdateTaskTarget();
 
 	UFUNCTION()
@@ -54,6 +57,12 @@ public:
 
 	UFUNCTION()
 	void ReplicatedUsing_bTaskIsEndChange();
+
+	//追踪的位置或对象同步了
+	UFUNCTION()
+	void ReplicatedUsing_TaskMarkLocation();
+	UFUNCTION()
+	void ReplicatedUsing_TaskMarkActors();
 
 	//通过信息刷新单个任务目标 该函数需要在服务器调用
 	UFUNCTION(BlueprintCallable)
@@ -118,6 +127,13 @@ public:
 		void TaskUpdate();
 	virtual void TaskUpdate_Implementation();
 
+	/*任务时间更新 TaskTime变动时触发
+	* 服务器客户端均会调用
+	*/
+	UFUNCTION(BlueprintNativeEvent)
+	void TaskTimeUpdate();
+	virtual void TaskTimeUpdate_Implementation();
+
 	/*任务目标更新 通常是某个目标被刷新了（进度产生了变换） 新增/移除目标
 	* UpdateTaskTarget：哪个目标导致的更新
 	* 服务器客户端均会调用
@@ -160,6 +176,13 @@ public:
 		void TaskEnd();
 	virtual void TaskEnd_Implementation();
 
+	/*任务结束 目标全部完成 / 任务时间到了
+	* 服务器客户端均会调用
+	*/
+	UFUNCTION(BlueprintNativeEvent)
+	void TaskTimeEndBack();
+	virtual void TaskTimeEndBack_Implementation();
+
 	//主动使该任务结束 该函数需要在服务器调用 IsComplete：是否是完成结束该任务
 	UFUNCTION(BlueprintCallable)
 	void ServerTaskEnd(bool IsComplete = true);
@@ -185,6 +208,10 @@ public:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
 	void ServerAddTaskTarget(FTaskTargetInfo NewTaskTargetInfo);
 	virtual void ServerAddTaskTarget_Implementation(FTaskTargetInfo NewTaskTargetInfo);
+
+	//重设任务计时 该函数需要在服务器调用
+	UFUNCTION(BlueprintCallable)
+	void ServerReSetTaskTime(float Time);
 
 	//根据任务目标信息设置计时器
 	UFUNCTION()
@@ -290,7 +317,8 @@ public:
 	UFUNCTION(BlueprintCallable)
 	FName GetLastRoleSignFromTaskTargetID(int32 TaskTargetID);
 public:
-	
+	UPROPERTY(BlueprintAssignable)
+		FTaskDelegate TaskReSetTimeEvent;
 	UPROPERTY(BlueprintAssignable)
 		FTaskDelegate TaskStartEvent;
 	UPROPERTY(BlueprintAssignable)
@@ -306,6 +334,11 @@ public:
 	//任务信息
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated, ReplicatedUsing = ReplicatedUsing_TaskInfoChange, Meta = (ExposeOnSpawn = True))
 	FTaskInfo TaskInfo;
+
+	//任务时间信息——需要单独出FTaskInfo 原因时不希望FTaskInfo的其他参数变动时误以为是时间更新了（例如名称变动）
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated, ReplicatedUsing = ReplicatedUsing_TaskTime, Meta = (ExposeOnSpawn = True))
+	float TaskTime;
+
 	//“上次”的全部任务目标
 	UPROPERTY(EditAnywhere, BlueprintReadWrite)
 	TArray<FTaskTargetInfo> LastAllTaskTargetInfo;
@@ -341,14 +374,11 @@ public:
 	UPROPERTY(BlueprintReadWrite)
 		TMap<FString, FTimerHandle> TaskTargetTimeHandle;
 
-	//任务标记显示状态
-	UPROPERTY(BlueprintReadWrite, Replicated)
-		bool bIsShowTaskMark = false;
 	//任务标记的Actor信息
-	UPROPERTY(BlueprintReadWrite, Replicated)
+	UPROPERTY(BlueprintReadWrite, ReplicatedUsing = ReplicatedUsing_TaskMarkActors)
 		TArray<AActor*> TaskMarkActors;
 	//任务标记的位置信息
-	UPROPERTY(BlueprintReadWrite, Replicated)
+	UPROPERTY(BlueprintReadWrite, ReplicatedUsing = ReplicatedUsing_TaskMarkLocation)
 		TArray<FVector> TaskMarkLocation;
 
 	UPROPERTY(BlueprintAssignable)
@@ -369,4 +399,8 @@ public:
 	//任务目标签名记录<任务目标ID,最后触发进度的签名> 该值仅在服务器有效
 	UPROPERTY(BlueprintReadWrite)
 	TMap<int32, FName> TaskTargetRoleSign;
+
+	//是否标记任务
+	UPROPERTY(BlueprintReadWrite)
+	bool bIsMarkTask = false;
 };
