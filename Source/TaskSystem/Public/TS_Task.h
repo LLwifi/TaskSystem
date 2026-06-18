@@ -44,11 +44,8 @@ public:
 	void ReplicatedUsing_TaskTime();
 
 	UFUNCTION()
-	void ReplicatedUsing_CurUpdateTaskTarget();
-
-	UFUNCTION()
 	void ReplicatedUsing_bTaskIsInitChange();
-	
+
 	UFUNCTION()
 	void ReplicatedUsing_bTaskIsStartChange();
 
@@ -86,12 +83,12 @@ public:
 	* return：是否在数据表上找到了同ID的行数据
 	*/
 	UFUNCTION()
-		bool TryInitTaskInfoFromDataTable(FTaskInfo& DataTaskInfo, FTaskInfo& DTTaskInfo);
+	bool TryInitTaskInfoFromDataTable(FTaskInfo& DataTaskInfo, FTaskInfo& DTTaskInfo);
 
 	//在设置任务时的修改方案：可以通过该函数修改任务信息
 	UFUNCTION(BlueprintNativeEvent)
 	FTaskInfo ModifyTaskInfo(FTaskInfo DataTaskInfo);
-		virtual FTaskInfo ModifyTaskInfo_Implementation(FTaskInfo DataTaskInfo);
+	virtual FTaskInfo ModifyTaskInfo_Implementation(FTaskInfo DataTaskInfo);
 
 	/*尝试通过数据表初始化任务目标
 	* DataTaskTarget：原始信息，主要使用DataTaskTarget.TaskTargetID查表。在查询到同ID的数据后会进行覆盖
@@ -99,7 +96,7 @@ public:
 	* return：是否在数据表上找到了同ID的行数据
 	*/
 	UFUNCTION()
-		bool TryInitTaskTargetFromDataTable(FTaskTargetInfo& DataTaskTarget, FTaskTargetInfo& DTTaskTargetInfo);
+	bool TryInitTaskTargetFromDataTable(FTaskTargetInfo& DataTaskTarget, FTaskTargetInfo& DTTaskTargetInfo);
 
 	//在设置任务时的修改方案：可以通过该函数修改任务信息
 	UFUNCTION(BlueprintNativeEvent)
@@ -117,14 +114,14 @@ public:
 	* 服务器客户端均会调用
 	*/
 	UFUNCTION(BlueprintNativeEvent)
-		void StartTask();
+	void StartTask();
 	virtual void StartTask_Implementation();
 
 	/*任务更新 TaskInfo更新时触发（任务数据本身发生改变，如任务结束、任务名称修改等），TaskTargetUpdate调用时该函数也会触发
 	* 服务器客户端均会调用
 	*/
 	UFUNCTION(BlueprintNativeEvent)
-		void TaskUpdate();
+	void TaskUpdate();
 	virtual void TaskUpdate_Implementation();
 
 	/*任务时间更新 TaskTime变动时触发
@@ -173,7 +170,7 @@ public:
 	* 服务器客户端均会调用
 	*/
 	UFUNCTION(BlueprintNativeEvent)
-		void TaskEnd();
+	void TaskEnd();
 	virtual void TaskEnd_Implementation();
 
 	/*任务结束 目标全部完成 / 任务时间到了
@@ -226,7 +223,7 @@ public:
 
 	//某个任务目标计时结束 该函数只在服务器调用
 	UFUNCTION()
-		void SomeTaskTargetTimeEnd();
+	void SomeTaskTargetTimeEnd();
 
 	/*某个任务目标结束的通知函数 该函数只在服务器调用
 	* 调用情况1：时间自然结束了
@@ -236,12 +233,12 @@ public:
 	* RoleSign：哪个角色导致的结束，如果是自然时间结束该值也为None
 	*/
 	UFUNCTION(BlueprintNativeEvent)
-		void SomeTaskTargetEnd(FTaskTargetInfo CompleteTaskTarget, bool IsComplete, FName RoleSign = "None");
+	void SomeTaskTargetEnd(FTaskTargetInfo CompleteTaskTarget, bool IsComplete, FName RoleSign = "None");
 	virtual void SomeTaskTargetEnd_Implementation(FTaskTargetInfo CompleteTaskTarget, bool IsComplete, FName RoleSign = "None");
 
 	//某个任务目标更新的比对
 	UFUNCTION(BlueprintNativeEvent)
-		bool SomeTaskTargetUpdateCheck(FTaskTargetInfo CheckTaskTarget, FRefreshTaskTargetInfo RefreshTaskTargetInfo);
+	bool SomeTaskTargetUpdateCheck(FTaskTargetInfo CheckTaskTarget, FRefreshTaskTargetInfo RefreshTaskTargetInfo);
 	virtual bool SomeTaskTargetUpdateCheck_Implementation(FTaskTargetInfo CheckTaskTarget, FRefreshTaskTargetInfo RefreshTaskTargetInfo);
 
 	/*获取任务参数
@@ -251,7 +248,7 @@ public:
 	* Index：决定Value的值是哪个下标
 	* Value：ParameterName参数中Index的参数
 	* 注意:找不到ParameterName才会返回false，如果找到了但index下标的值找不到只会影响Value的值
-	* 
+	*
 	*/
 	UFUNCTION(BlueprintPure)
 	bool GetTaskParameterValue(FName ParameterName, int32 Index, float& Value, FTaskParameter& Parameter);
@@ -279,7 +276,7 @@ public:
 	* 由子类去完成如何根据任务标记信息GetTaskMarkInfo()显示
 	*/
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
-		void MarkTaskShow();
+	void MarkTaskShow();
 	virtual void MarkTaskShow_Implementation();
 
 	/*标记任务隐藏
@@ -288,12 +285,16 @@ public:
 	* 由子类去完成如何隐藏/删除任务标记显示
 	*/
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
-		void MarkTaskHide();
+	void MarkTaskHide();
 	virtual void MarkTaskHide_Implementation();
 
 	//通过ID获取该任务上的任务目标
 	//UFUNCTION(BlueprintPure)
 	bool GetTaskTargetFromID(int32 ID, FTaskTargetInfo*& TaskTargetInfo);
+
+	//通过ID获取该任务上的任务目标
+	UFUNCTION(BlueprintCallable)
+	void SetTaskTargetMaxCountFromID(int32 ID, int32 NewMaxCount);
 
 	/*触发任务的连锁信息
 	* 主动调用时请保证TriggerType = ETS_TaskChainTriggerType::Active
@@ -316,17 +317,21 @@ public:
 	//通过任务目标ID获取最后刷新的角色签名
 	UFUNCTION(BlueprintCallable)
 	FName GetLastRoleSignFromTaskTargetID(int32 TaskTargetID);
+
+	//获取一个拥有该任务有效的任务组件
+	UFUNCTION(BlueprintPure)
+	UTS_TaskComponent* GetValidTaskComponent();
 public:
 	UPROPERTY(BlueprintAssignable)
-		FTaskDelegate TaskReSetTimeEvent;
+	FTaskDelegate TaskReSetTimeEvent;
 	UPROPERTY(BlueprintAssignable)
-		FTaskDelegate TaskStartEvent;
+	FTaskDelegate TaskStartEvent;
 	UPROPERTY(BlueprintAssignable)
-		FTaskDelegate TaskUpdateEvent;
+	FTaskDelegate TaskUpdateEvent;
 	UPROPERTY(BlueprintAssignable)
-		FTaskDelegate TaskFinishEvent;
+	FTaskDelegate TaskFinishEvent;
 	UPROPERTY(BlueprintAssignable)
-		FTaskDelegate TaskEndEvent;
+	FTaskDelegate TaskEndEvent;
 
 	//任务的唯一ID
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated)
@@ -345,57 +350,52 @@ public:
 
 	//任务是否完成
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated)
-		bool bTaskIsComplete = false;
+	bool bTaskIsComplete = false;
 	//任务是否初始化
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, ReplicatedUsing = ReplicatedUsing_bTaskIsInitChange)
-		bool bTaskIsInit = false;
+	bool bTaskIsInit = false;
 	//任务是否开始
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, ReplicatedUsing = ReplicatedUsing_bTaskIsStartChange)
-		bool bTaskIsStart = false;
+	bool bTaskIsStart = false;
 	//任务是否完成
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, ReplicatedUsing = ReplicatedUsing_bTaskIsFinishChange)
-		bool bTaskIsFinish = false;
+	bool bTaskIsFinish = false;
 	//任务是否结束
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, ReplicatedUsing = ReplicatedUsing_bTaskIsEndChange)
-		bool bTaskIsEnd = false;
+	bool bTaskIsEnd = false;
 
 	//拥有该任务的全部组件
 	UPROPERTY(BlueprintReadOnly)
-		TArray<UTS_TaskComponent*> AllTaskComponent;
+	TArray<UTS_TaskComponent*> AllTaskComponent;
 
 	//接取该任务的单位签名
 	UPROPERTY(BlueprintReadWrite, Replicated)
-		TArray<FName> RoleSigns;
+	TArray<FName> RoleSigns;
 
 	//任务时长
 	UPROPERTY(BlueprintReadWrite)
-		FTimerHandle TaskTimeHandle;
+	FTimerHandle TaskTimeHandle;
 	//该任务每个任务目标的时长Handle<目标名称,时长Handle>
 	UPROPERTY(BlueprintReadWrite)
-		TMap<FString, FTimerHandle> TaskTargetTimeHandle;
+	TMap<FString, FTimerHandle> TaskTargetTimeHandle;
 
 	//任务标记的Actor信息
 	UPROPERTY(BlueprintReadWrite, ReplicatedUsing = ReplicatedUsing_TaskMarkActors)
-		TArray<AActor*> TaskMarkActors;
+	TArray<AActor*> TaskMarkActors;
 	//任务标记的位置信息
 	UPROPERTY(BlueprintReadWrite, ReplicatedUsing = ReplicatedUsing_TaskMarkLocation)
-		TArray<FVector> TaskMarkLocation;
+	TArray<FVector> TaskMarkLocation;
 
 	UPROPERTY(BlueprintAssignable)
-		FTaskMarkInfoDelegate TaskMarkInfoUpdate;
+	FTaskMarkInfoDelegate TaskMarkInfoUpdate;
 
 	//任务参数<参数名，参数>
 	UPROPERTY(BlueprintReadWrite)
-		TMap<FName, FTaskParameter> TaskParameter;
-
-	/*当前导致TaskTargetUpdate触发的任务目标信息
-	*/
-	UPROPERTY(BlueprintReadWrite, ReplicatedUsing = ReplicatedUsing_CurUpdateTaskTarget)
-	TArray<FTaskTargetInfo> CurUpdateTaskTarget;
+	TMap<FName, FTaskParameter> TaskParameter;
 
 	UPROPERTY(BlueprintReadWrite)
 	UTS_GISubsystem* TS_GISubsystem;
-	
+
 	//任务目标签名记录<任务目标ID,最后触发进度的签名> 该值仅在服务器有效
 	UPROPERTY(BlueprintReadWrite)
 	TMap<int32, FName> TaskTargetRoleSign;

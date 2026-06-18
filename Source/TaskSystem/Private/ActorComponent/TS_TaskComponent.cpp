@@ -13,14 +13,17 @@ UTS_TaskComponent::UTS_TaskComponent()
 	// Set this component to be initialized when the game starts, and to be ticked every frame.  You can turn these features
 	// off to improve performance if you don't need them.
 	PrimaryComponentTick.bCanEverTick = true;
+
 	if (TaskRole == ETS_TaskRole::Player)
 	{
 		SetIsReplicatedByDefault(true);
-		//SetIsReplicated(true);
+		// 开启 UE5 新版子对象同步列表机制
+		bReplicateUsingRegisteredSubObjectList = true;
 	}
 	else
 	{
 		SetIsReplicatedByDefault(false);
+		bReplicateUsingRegisteredSubObjectList = false;
 	}
 
 	// ...
@@ -37,10 +40,12 @@ void UTS_TaskComponent::PostEditChangeProperty(FPropertyChangedEvent& PropertyCh
 		if (TaskRole == ETS_TaskRole::Player)
 		{
 			SetIsReplicated(true);
+			bReplicateUsingRegisteredSubObjectList = true;
 		}
 		else
 		{
 			SetIsReplicated(false);
+			bReplicateUsingRegisteredSubObjectList = false;
 		}
 	}
 }
@@ -66,14 +71,17 @@ bool UTS_TaskComponent::ReplicateSubobjects(class UActorChannel* Channel, FOutBu
 {
 	bool bWrote = Super::ReplicateSubobjects(Channel, Bunch, RepFlags);
 	//手动同步任务类
-	for (UTS_Task*& Task : AllTask)
-	{
-		if (!IsValid(Task))
-		{
-			continue;
-		}
-		bWrote |= Channel->ReplicateSubobject(Task, *Bunch, *RepFlags);
-	}
+	//for (UTS_Task*& Task : AllTask)
+	//{
+	//	if (!IsValid(Task))
+	//	{
+	//		continue;
+	//	}
+	//	bWrote |= Channel->ReplicateSubobject(Task, *Bunch, *RepFlags);
+	//}
+
+	//// 引擎底层会自动遍历 MyItemsArray，并对里面的每一个有效 UObject 调用同步逻辑
+	//bWrote |= Channel->ReplicateSubobjectList(AllTask, *Bunch, *RepFlags);
 
 	return bWrote;
 }
@@ -127,9 +135,27 @@ void UTS_TaskComponent::ServerAddTask_Implementation(UTS_Task* NewTask)
 {
 	if (NewTask)
 	{
-		//NewTask->TaskLinkInfo = TaskLinkInfo;
 		NewTask->RoleSigns.Add(GetRoleSign());
+
+		// 【关键步骤】将其注册到引擎组件的底层同步列表中
+		// 底层会检查并利用 Push Model 机制将其纳入脏数据追踪范围
+		AddReplicatedSubObject(NewTask);
+		// 写入同步数组，触发引用同步
 		AllTask.Add(NewTask);
+
+		/*
+		//后续删除时的顺序
+		// 1. 先从同步数组中移除，切断引用链
+		SubObjectsList.Remove(TargetObj);
+
+		// 2. 【关键步骤】从组件的底层网络列表中注销
+		// 这一步会安全关闭该子对象的 NetID 和对应的网络追踪，不再对其内部属性进行同步
+		RemoveReplicatedSubObject(TargetObj);
+
+		// 3. 释放逻辑层对该对象的强引用，使其能在下一个 GC 周期被安全回收
+		// 注：无需手动调用 ConditionalBeginDestroy()，保持标准的 UObject 生命周期管理即可
+		*/
+
 		NewTask->AllTaskComponent.Add(this);
 		NewTask->StartTask();//服务器调用该函数
 		AddTaskEvent.Broadcast(this, NewTask);
@@ -227,6 +253,14 @@ bool UTS_TaskComponent::GetTaskOfID(int32 TaskID, UTS_Task*& Task)
 		}
 	}
 	return false;
+}
+
+void UTS_TaskComponent::NetMultiTaskTargetUpdate_Implementation(UTS_Task* Task, FTaskTargetInfo UpdateTaskTarget)
+{
+	if (Task)
+	{
+		Task->TaskTargetUpdate(UpdateTaskTarget);
+	}
 }
 
 void UTS_TaskComponent::ServerChangeTaskMarkStateFromTask_Implementation(UTS_Task* Task, bool ShowOrHide)

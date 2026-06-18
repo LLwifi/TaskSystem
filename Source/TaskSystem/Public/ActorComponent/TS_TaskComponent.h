@@ -105,11 +105,17 @@ public:
 	UFUNCTION(BlueprintCallable, Server, Reliable)
 	void ServerChangeTaskMarkStateFromTask(UTS_Task* Task, bool ShowOrHide);
 
-	/*多播 通过任务改变标记状态
+	/*多播 通过任务组件改变标记状态
 	* 因为任务本身（Object）不支持RPC函数，这里利用组件进行多播
 	*/
 	UFUNCTION(BlueprintCallable, NetMulticast, Reliable)
 	void NetMultiChangeTaskMarkStateFromTask(UTS_Task* Task, bool ShowOrHide);
+
+	/*多播 通过任务组件多播任务目标的更新
+	* 因为任务本身（Object）不支持RPC函数，这里利用组件进行多播
+	*/
+	UFUNCTION(BlueprintCallable, NetMulticast, Reliable)
+	void NetMultiTaskTargetUpdate(UTS_Task* Task, FTaskTargetInfo UpdateTaskTarget);
 
 	//重设任务计时 该函数需要在服务器调用
 	UFUNCTION(BlueprintCallable, Server, Reliable)

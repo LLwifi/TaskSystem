@@ -62,7 +62,6 @@ void UTS_Task::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetime
 
 	DOREPLIFETIME(UTS_Task, TaskMarkActors);
 	DOREPLIFETIME(UTS_Task, TaskMarkLocation);
-	DOREPLIFETIME(UTS_Task, CurUpdateTaskTarget);
 }
 
 void UTS_Task::ReplicatedUsing_TaskInfoChange()
@@ -73,20 +72,6 @@ void UTS_Task::ReplicatedUsing_TaskInfoChange()
 void UTS_Task::ReplicatedUsing_TaskTime()
 {
 	TaskTimeUpdate();
-}
-
-void UTS_Task::ReplicatedUsing_CurUpdateTaskTarget()
-{
-	//客户端的相关函数在同步后调用
-	TArray<FTaskTargetInfo> UpdateTaskTargetArray = CurUpdateTaskTarget;
-	for (FTaskTargetInfo& TaskTargetInfo : UpdateTaskTargetArray)
-	{
-		if (!TaskTargetInfo.TaskTargetText.IsEmpty())//标题为空的是无效目标
-		{
-			TaskTargetUpdate(TaskTargetInfo);
-		}
-	}
-	CurUpdateTaskTarget.Empty();
 }
 
 void UTS_Task::ReplicatedUsing_bTaskIsInitChange()
@@ -136,8 +121,34 @@ void UTS_Task::ServerRefreshOneTaskTargetFromID(FRefreshTaskTargetInfo RefreshTa
 
 void UTS_Task::ServerRefreshOneTaskTargetFromInfo(FRefreshTaskTargetInfo RefreshTaskTargetInfo, UPARAM(Ref)FTaskTargetInfo& TaskTargetInfo)
 {
-	if (!TaskTargetInfo.bTaskTargetIsEnd && (RefreshTaskTargetInfo.RefreshTaskTargetID == TaskTargetInfo.TaskTargetID ||//ID相同直接通过
-		(TaskTargetInfo.bCompareInfoIsOverride && SomeTaskTargetUpdateCheck(TaskTargetInfo, RefreshTaskTargetInfo))))//开启除了ID之外的其他检测方式 && 经过自定义的二次比对后可以增加进度
+	bool IsPass = false;
+	if (!TaskTargetInfo.bTaskTargetIsEnd)
+	{
+		if ((RefreshTaskTargetInfo.RefreshTaskTargetID == TaskTargetInfo.TaskTargetID ||//ID相同直接通过
+			(TaskTargetInfo.bCompareInfoIsOverride && SomeTaskTargetUpdateCheck(TaskTargetInfo, RefreshTaskTargetInfo))))//开启除了ID之外的其他检测方式 && 经过自定义的二次比对后可以增加进度
+		{
+			IsPass = true;
+		}
+		else
+		{
+			//其他比对信息比较
+			for (FTS_RefreshTaskTargetBeCompareInfo& BeCompareInfo : TaskTargetInfo.RefreshBeCompareInfos)
+			{
+				FText FailText;
+				if (BeCompareInfo.BeCompareInfo.CompareResult(RefreshTaskTargetInfo.CompareInfo, FailText))
+				{
+					if (BeCompareInfo.bIsOverrideProgress)//是否覆盖要增加的进度
+					{
+						RefreshTaskTargetInfo.AddProgress = BeCompareInfo.Progress;
+					}
+					IsPass = true;
+					break;
+				}
+			}
+		}
+	}
+
+	if (IsPass)
 	{
 		FTaskTargetInfo TempTaskTargetInfo = TaskTargetInfo;
 		//通过比对
@@ -146,7 +157,10 @@ void UTS_Task::ServerRefreshOneTaskTargetFromInfo(FRefreshTaskTargetInfo Refresh
 			TempTaskTargetInfo = TaskTargetInfo;
 			SomeTaskTargetEnd(TaskTargetInfo, true, RefreshTaskTargetInfo.RoleSign);
 		}
-		TaskTargetUpdate(TempTaskTargetInfo);//服务器调用该函数
+		if (GetValidTaskComponent())
+		{
+			GetValidTaskComponent()->NetMultiTaskTargetUpdate(this, TempTaskTargetInfo);
+		}
 		TaskTargetRoleSign.Add(TempTaskTargetInfo.TaskTargetID, RefreshTaskTargetInfo.RoleSign);//记录最新的签名
 	}
 }
@@ -309,7 +323,6 @@ void UTS_Task::TaskTimeUpdate_Implementation()
 
 void UTS_Task::TaskTargetUpdate_Implementation(FTaskTargetInfo UpdateTaskTarget)
 {
-	CurUpdateTaskTarget.Add(UpdateTaskTarget);
 	TaskUpdate();
 
 	//服务器的相关函数通常会立刻调用
@@ -481,7 +494,10 @@ void UTS_Task::ServerTaskTargetEnd_TaskTargetInfo(UPARAM(Ref)FTaskTargetInfo& Ta
 		TaskTargetInfo.TaskTargetCurCount = TaskTargetInfo.TaskTargetMaxCount;
 	}
 	SomeTaskTargetEnd(TaskTargetInfo, IsComplete, GetLastRoleSignFromTaskTargetID(TaskTargetInfo.TaskTargetID));
-	TaskTargetUpdate(TaskTargetInfo);
+	if (GetValidTaskComponent())
+	{
+		GetValidTaskComponent()->NetMultiTaskTargetUpdate(this, TaskTargetInfo);
+	}
 	TaskEndCheck();
 }
 
@@ -489,7 +505,10 @@ void UTS_Task::ServerAddTaskTarget_Implementation(FTaskTargetInfo NewTaskTargetI
 {
 	TaskInfo.TaskTargetInfo.Add(NewTaskTargetInfo);
 	SetTaskTargetTimer(NewTaskTargetInfo);
-	TaskTargetUpdate(NewTaskTargetInfo);//添加目标
+	if (GetValidTaskComponent())
+	{
+		GetValidTaskComponent()->NetMultiTaskTargetUpdate(this, NewTaskTargetInfo);//添加目标
+	}
 }
 
 void UTS_Task::ServerReSetTaskTime(float Time)
@@ -564,7 +583,10 @@ void UTS_Task::SomeTaskTargetTimeEnd()
 						TaskInfo.TaskTargetInfo[i].TaskTargetCurCount = TaskInfo.TaskTargetInfo[i].TaskTargetMaxCount;
 					}
 					SomeTaskTargetEnd(TaskInfo.TaskTargetInfo[i], TaskInfo.TaskTargetInfo[i].bTimeEndComplete, "None");
-					TaskTargetUpdate(TaskInfo.TaskTargetInfo[i]);//服务器调用更新
+					if (GetValidTaskComponent())
+					{
+						GetValidTaskComponent()->NetMultiTaskTargetUpdate(this, TaskInfo.TaskTargetInfo[i]);//添加目标
+					}
 					GetWorld()->GetTimerManager().ClearTimer(TaskTargetTimeHandle[Key]);
 					TaskTargetTimeHandle.Remove(Key);
 					IsFind = true;
@@ -722,6 +744,16 @@ bool UTS_Task::GetTaskTargetFromID(int32 ID, FTaskTargetInfo*& TaskTargetInfo)
 		}
 	}
 	return false;
+}
+
+void UTS_Task::SetTaskTargetMaxCountFromID(int32 ID, int32 NewMaxCount)
+{
+	FTaskTargetInfo* TaskTargetInfo;
+	GetTaskTargetFromID(ID, TaskTargetInfo);
+	if (TaskTargetInfo)
+	{
+		TaskTargetInfo->TaskTargetMaxCount = NewMaxCount;
+	}
 }
 
 void UTS_Task::TriggerTaskChainAddInfo(FTaskChainAddInfo TaskChainAddInfo, ETS_TaskChainTriggerType TriggerType, FName RoleSign)
@@ -927,4 +959,16 @@ FName UTS_Task::GetLastRoleSignFromTaskTargetID(int32 TaskTargetID)
 		RoleSign = TaskTargetRoleSign[TaskTargetID];
 	}
 	return RoleSign;
+}
+
+UTS_TaskComponent* UTS_Task::GetValidTaskComponent()
+{
+	for (UTS_TaskComponent*& TaskCom : AllTaskComponent)
+	{
+		if (TaskCom)
+		{
+			return TaskCom;
+		}
+	}
+	return nullptr;
 }

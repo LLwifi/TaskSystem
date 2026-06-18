@@ -262,6 +262,26 @@ public:
 	bool bAddTaskToTriggerRole = true;
 };
 
+/*刷新任务目标被比对信息
+*/
+USTRUCT(BlueprintType)
+struct FTS_RefreshTaskTargetBeCompareInfo
+{
+	GENERATED_BODY()
+public:
+	//被比对信息
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FCC_BeCompareInfo BeCompareInfo;
+
+	//是否覆盖外部传递的进度值
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	bool bIsOverrideProgress = false;
+	//比对通过时增加的进度
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditConditionHides, EditCondition = "bIsOverrideProgress"))
+	int32 Progress = 1;
+};
+
+
 /*任务目标
 */
 USTRUCT(BlueprintType)
@@ -312,6 +332,10 @@ public:
 		{
 			bCompareInfoIsOverride = TaskTargetInfo.bCompareInfoIsOverride;
 			BeCompareInfo = TaskTargetInfo.BeCompareInfo;
+		}
+		if (RefreshBeCompareInfos.Num() == 0)
+		{
+			RefreshBeCompareInfos = TaskTargetInfo.RefreshBeCompareInfos;
 		}
 		if (ChainAddInfo.Num() == 0)
 		{
@@ -438,6 +462,10 @@ public:
 	//被比对信息
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (EditConditionHides, EditCondition = "bCompareInfoIsOverride"))
 	FCC_BeCompareInfo BeCompareInfo;
+
+	//刷新任务目标被比对信息
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TArray<FTS_RefreshTaskTargetBeCompareInfo> RefreshBeCompareInfos;
 
 	/*添加连锁目标信息 当该任务目标完成时，会自动触发尝试添加的任务/任务目标ID
 	* 该值有效且bIsCustom为false时，可以覆盖表数据的参数
